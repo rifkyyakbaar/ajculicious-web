@@ -1,0 +1,468 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { createSupabaseServerClient } from '../lib/supabase/server';
+import {
+  ActionResponse,
+  AdminUserProfile,
+  DbOrderStatus,
+  DbPaymentStatus,
+  OrderWithItems,
+  ProductRow,
+  SalesSummaryReport,
+  TopSellingProductStat,
+} from '../types/database';
+
+/**
+ * Server Action: loginAdmin
+ * ----------------------------------------------------------------------------
+ * Memverifikasi email & password admin terhadap tabel `public.admin_users`
+ * di Supabase menggunakan fungsi RPC Bcrypt `public.verify_admin_login`.
+ */
+export async function loginAdmin(
+  email: string,
+  password: string
+): Promise<ActionResponse<AdminUserProfile>> {
+  try {
+    const cleanEmail = (email ?? '').trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      return {
+        success: false,
+        error: 'Email dan password wajib diisi.',
+      };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data, error } = await supabase.rpc('verify_admin_login', {
+      p_email: cleanEmail,
+      p_password: password,
+    });
+
+    if (error || !data) {
+      return {
+        success: false,
+        error: error?.message || 'Gagal menghubungi server autentikasi.',
+      };
+    }
+
+    if (!data.authenticated || !data.admin) {
+      return {
+        success: false,
+        error: data.error || 'Email atau password salah.',
+      };
+    }
+
+    return {
+      success: true,
+      data: data.admin as AdminUserProfile,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal login admin.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: updateOrderStatus
+ * ----------------------------------------------------------------------------
+ * Mengubah status pesanan ('PENDING' -> 'SIAP_DIAMBIL' -> 'SELESAI' / 'BATAL').
+ * Jika diubah menjadi 'BATAL', fungsi PostgreSQL `update_order_status_atomic`
+ * otomatis mengembalikan stok produk ke tabel `products`.
+ */
+export async function updateOrderStatus(
+  orderId: string,
+  newStatus: DbOrderStatus
+): Promise<ActionResponse<{ order_id: string; new_status: DbOrderStatus }>> {
+  try {
+    const validStatuses: DbOrderStatus[] = [
+      'PENDING',
+      'SIAP_DIAMBIL',
+      'SELESAI',
+      'BATAL',
+    ];
+    if (!orderId || !validStatuses.includes(newStatus)) {
+      return {
+        success: false,
+        error: 'ID pesanan atau status baru tidak valid.',
+      };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data, error } = await supabase.rpc('update_order_status_atomic', {
+      p_order_id: orderId,
+      p_new_status: newStatus,
+    });
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || 'Gagal memperbarui status pesanan.',
+      };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/cek-pesanan');
+
+    return {
+      success: true,
+      data: {
+        order_id: orderId,
+        new_status: data?.new_status ?? newStatus,
+      },
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal mengubah status.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: updateOrderPaymentStatus
+ * ----------------------------------------------------------------------------
+ * Mengubah status pembayaran pesanan secara manual ('BELUM_BAYAR' | 'SUDAH_BAYAR')
+ */
+export async function updateOrderPaymentStatus(
+  orderId: string,
+  paymentStatus: DbPaymentStatus
+): Promise<ActionResponse<{ order_id: string; payment_status: DbPaymentStatus }>> {
+  try {
+    if (
+      !orderId ||
+      (paymentStatus !== 'BELUM_BAYAR' && paymentStatus !== 'SUDAH_BAYAR')
+    ) {
+      return {
+        success: false,
+        error: 'Status pembayaran tidak valid.',
+      };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { error } = await supabase
+      .from('orders')
+      .update({ payment_status: paymentStatus })
+      .eq('id', orderId);
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || 'Gagal memperbarui status pembayaran.',
+      };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/cek-pesanan');
+    revalidatePath('/admin');
+
+    return {
+      success: true,
+      data: {
+        order_id: orderId,
+        payment_status: paymentStatus,
+      },
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Gagal mengubah status pembayaran.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: CRUD Produk (Tambah / Update Harga, Bahan/Ingredients, & Status PO)
+ */
+export async function upsertProduct(input: {
+  id?: string;
+  category_slug: string;
+  name: string;
+  slug?: string;
+  description: string;
+  price: number;
+  stock?: number;
+  image_url?: string;
+  badge?: string;
+  emoji?: string;
+  ingredients?: string[];
+  is_available?: boolean;
+}): Promise<ActionResponse<ProductRow>> {
+  try {
+    const cleanName = input.name.trim();
+    if (!cleanName || input.price < 0) {
+      return {
+        success: false,
+        error: 'Nama produk dan harga (>= 0) harus valid.',
+      };
+    }
+
+    const slug =
+      input.slug?.trim() ||
+      cleanName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+
+    const supabase = createSupabaseServerClient();
+
+    const { data: catData, error: catError } = await supabase
+      .from('categories')
+      .select('id')
+      .eq('slug', input.category_slug)
+      .single();
+
+    if (catError || !catData) {
+      return {
+        success: false,
+        error: `Kategori "${input.category_slug}" tidak ditemukan.`,
+      };
+    }
+
+    const cleanIngredients =
+      input.ingredients && input.ingredients.length > 0
+        ? input.ingredients.map((i) => i.trim()).filter(Boolean)
+        : ['Bahan Pilihan Premium', 'Fresh Homemade'];
+
+    const payload = {
+      ...(input.id ? { id: input.id } : {}),
+      category_id: catData.id,
+      name: cleanName,
+      slug,
+      description: input.description.trim(),
+      price: Math.floor(input.price),
+      stock: 999,
+      image_url: input.image_url || '/images/storefront-counter.jpg',
+      badge: input.badge || 'Favorit',
+      emoji: input.emoji || '🍪',
+      ingredients: cleanIngredients,
+      is_available:
+        input.is_available !== undefined ? input.is_available : true,
+    };
+
+    const { data, error } = await supabase
+      .from('products')
+      .upsert(payload, { onConflict: 'slug' })
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      return {
+        success: false,
+        error: error?.message || 'Gagal menyimpan produk ke database.',
+      };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/admin');
+    return {
+      success: true,
+      data: data as ProductRow,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal menyimpan produk.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: Toggle Status Ketersediaan PO & Update Harga Produk
+ */
+export async function updateProductStockAndAvailability(
+  productId: string,
+  _stock: number,
+  isAvailable: boolean,
+  price?: number
+): Promise<ActionResponse<ProductRow>> {
+  try {
+    const supabase = createSupabaseServerClient();
+    const updatePayload: Record<string, unknown> = {
+      is_available: isAvailable,
+    };
+    if (typeof price === 'number' && price >= 0) {
+      updatePayload.price = Math.floor(price);
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .update(updatePayload)
+      .eq('id', productId)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      return {
+        success: false,
+        error: error?.message || 'Gagal memperbarui status produk.',
+      };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/admin');
+    return {
+      success: true,
+      data: data as ProductRow,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal memperbarui produk.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: Update Pengaturan Batch PO di Database Supabase
+ */
+export async function updateBatchSettingsInDb(input: {
+  batchName: string;
+  isOpen: boolean;
+  orderDeadline: string;
+  readyPickupDate: string;
+  readyPickupTime: string;
+}): Promise<ActionResponse<boolean>> {
+  try {
+    const supabase = createSupabaseServerClient();
+    const { error } = await supabase
+      .from('batch_settings')
+      .update({
+        batch_name: input.batchName.trim(),
+        is_open: input.isOpen,
+        order_deadline: input.orderDeadline.trim(),
+        ready_pickup_date: input.readyPickupDate.trim(),
+        ready_pickup_time: input.readyPickupTime.trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', 1);
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || 'Gagal menyimpan jadwal Batch PO.',
+      };
+    }
+
+    revalidatePath('/');
+    return { success: true, data: true };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal menyimpan jadwal PO.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: Ambil Semua Pesanan & Ringkasan Laporan Penjualan (Agregasi)
+ */
+export async function getAdminOrdersAndSummary(): Promise<
+  ActionResponse<{
+    orders: OrderWithItems[];
+    summary: SalesSummaryReport;
+  }>
+> {
+  try {
+    const supabase = createSupabaseServerClient();
+
+    const { data: ordersData, error } = await supabase
+      .from('orders')
+      .select(
+        `
+        id,
+        invoice_code,
+        customer_name,
+        payment_method,
+        payment_status,
+        total_price,
+        status,
+        created_at,
+        order_items (
+          id,
+          order_id,
+          product_id,
+          product_name_snapshot,
+          quantity,
+          price_at_purchase,
+          subtotal
+        )
+      `
+      )
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || 'Gagal memuat laporan pesanan.',
+      };
+    }
+
+    const orders = (ordersData as unknown as OrderWithItems[]) ?? [];
+    const activeOrders = orders.filter((o) => o.status !== 'BATAL');
+
+    const totalOmzet = activeOrders.reduce((sum, o) => sum + o.total_price, 0);
+    const codOrdersCount = activeOrders.filter(
+      (o) => o.payment_method === 'COD'
+    ).length;
+    const qrisOrdersCount = activeOrders.filter(
+      (o) => o.payment_method === 'QRIS'
+    ).length;
+
+    const productStatsMap = new Map<string, TopSellingProductStat>();
+    for (const order of activeOrders) {
+      for (const item of order.order_items ?? []) {
+        const existing = productStatsMap.get(item.product_id) ?? {
+          product_id: item.product_id,
+          product_name: item.product_name_snapshot,
+          total_quantity_sold: 0,
+          total_revenue: 0,
+        };
+        existing.total_quantity_sold += item.quantity;
+        existing.total_revenue += item.subtotal;
+        productStatsMap.set(item.product_id, existing);
+      }
+    }
+
+    const topProducts = Array.from(productStatsMap.values()).sort(
+      (a, b) => b.total_quantity_sold - a.total_quantity_sold
+    );
+
+    const summary: SalesSummaryReport = {
+      total_omzet: totalOmzet,
+      total_orders: orders.length,
+      cod_orders_count: codOrdersCount,
+      qris_orders_count: qrisOrdersCount,
+      paid_orders_count: activeOrders.filter(
+        (o) => o.payment_status === 'SUDAH_BAYAR'
+      ).length,
+      unpaid_orders_count: activeOrders.filter(
+        (o) => (o.payment_status || 'BELUM_BAYAR') === 'BELUM_BAYAR'
+      ).length,
+      pending_orders_count: orders.filter((o) => o.status === 'PENDING').length,
+      ready_orders_count: orders.filter((o) => o.status === 'SIAP_DIAMBIL')
+        .length,
+      completed_orders_count: orders.filter((o) => o.status === 'SELESAI')
+        .length,
+      cancelled_orders_count: orders.filter((o) => o.status === 'BATAL').length,
+      top_products: topProducts,
+    };
+
+    return {
+      success: true,
+      data: {
+        orders,
+        summary,
+      },
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal memuat ringkasan.',
+    };
+  }
+}

@@ -1,15 +1,15 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  Users,
   Plus,
+  Check,
+  Sparkles,
   Cookie,
   UtensilsCrossed,
-  Sparkles,
-  Flame,
   PackageCheck,
-  Check,
+  Flame,
+  MousePointerClick,
 } from 'lucide-react';
 import { TeamMember, Product, CategorySlug } from '../types/ajculicious';
 import { formatRupiah } from '../utils/formatters';
@@ -18,303 +18,247 @@ interface HeroCounterProps {
   teamMembers: TeamMember[];
   activeMember: TeamMember;
   onSelectMember: (member: TeamMember) => void;
-  showHotspots: boolean;
   products: Product[];
   onAddToCart: (product: Product) => void;
   onFilterCategory: (category: CategorySlug) => void;
   onOpenOrderTracker: () => void;
   addedToastProduct?: string | null;
+  isTourHighlighted?: boolean;
 }
 
 export default function HeroCounter({
   teamMembers,
-  activeMember,
   onSelectMember,
-  showHotspots,
   products,
   onAddToCart,
   onFilterCategory,
   onOpenOrderTracker,
   addedToastProduct,
+  isTourHighlighted = false,
 }: HeroCounterProps) {
-  const favoriteProduct = products.find(
-    (p) => p.id === activeMember.favoriteProductId
-  );
+  const [hoveredMemberId, setHoveredMemberId] = useState<string | null>(null);
 
   return (
-    <div className="space-y-4">
-      {/* Container Ilustrasi Konter Flat-Vector dengan Scroll Horizontal Responsif */}
-      <div className="relative rounded-3xl overflow-hidden border-2 border-[#E6D8C7] shadow-md bg-[#FAF6F0]">
-        <div className="overflow-x-auto">
-          <div className="relative min-w-[850px] sm:min-w-[920px] w-full select-none">
-            {/* Foto Ilustrasi Kedai Konter Bakery AJCUlicious */}
-            <img
-              src="/images/storefront-counter.jpg"
-              alt="Konter Interaktif AJCUlicious dengan Staf dan Etalase"
-              className="w-full h-auto block"
-              loading="eager"
-            />
+    <div
+      id="tour-hero-counter"
+      className={`relative transition-all duration-300 ${
+        isTourHighlighted
+          ? 'z-40 ring-4 ring-amber-400 rounded-3xl shadow-2xl'
+          : 'z-20'
+      }`}
+    >
+      <div className="relative rounded-3xl border border-[#EADFD3] shadow-sm bg-white overflow-x-auto lg:overflow-visible">
+        <div className="relative min-w-[850px] sm:min-w-[920px] w-full select-none">
+          <img
+            src="/images/storefront-counter.jpg"
+            alt="Konter Interaktif AJCUlicious"
+            className="w-full h-auto block rounded-3xl"
+            loading="eager"
+          />
 
-            {/* HOTSPOT 1: Papan "PESAN DI SINI" */}
-            <button
-              type="button"
-              suppressHydrationWarning
-              onClick={() => onFilterCategory('all')}
-              style={{ left: '11.2%', top: '16.5%', width: '7.8%', height: '12%' }}
-              className="absolute group focus:outline-none"
-              title="Pilih menu di katalog"
-            >
+          {/* Area Interaktif Konter */}
+          <button
+            type="button"
+            suppressHydrationWarning
+            onClick={() => onFilterCategory('all')}
+            style={{ left: '11.2%', top: '16.5%', width: '7.8%', height: '12%' }}
+            className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
+            aria-label="Lihat Menu"
+          >
+            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+              <MousePointerClick className="w-3 h-3 text-amber-300" />
+              <span>Lihat Menu</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            suppressHydrationWarning
+            onClick={() => onFilterCategory('all')}
+            style={{ left: '29.8%', top: '9%', width: '26.2%', height: '20.5%' }}
+            className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
+            aria-label="Lihat Katalog Menu"
+          >
+            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+              <Sparkles className="w-3 h-3 text-amber-300" />
+              <span>Lihat Semua Menu</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            suppressHydrationWarning
+            onClick={() => onFilterCategory('dubai-cookies')}
+            style={{ left: '18.8%', top: '48.5%', width: '22%', height: '24%' }}
+            className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
+            aria-label="Menu Cookies"
+          >
+            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+              <Cookie className="w-3 h-3 text-amber-300" />
+              <span>Menu Cookies</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            suppressHydrationWarning
+            onClick={() => onFilterCategory('dimsum')}
+            style={{ left: '53.8%', top: '56%', width: '11.5%', height: '17%' }}
+            className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
+            aria-label="Menu Dimsum"
+          >
+            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+              <UtensilsCrossed className="w-3 h-3 text-amber-300" />
+              <span>Menu Dimsum</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            suppressHydrationWarning
+            onClick={onOpenOrderTracker}
+            style={{ left: '66%', top: '49%', width: '19%', height: '23%' }}
+            className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
+            aria-label="Cek Pesanan"
+          >
+            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+              <PackageCheck className="w-3 h-3 text-amber-300" />
+              <span>Cek Pesanan</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            suppressHydrationWarning
+            onClick={() => onFilterCategory('brownies')}
+            style={{ left: '85.5%', top: '46.5%', width: '13.8%', height: '25.5%' }}
+            className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
+            aria-label="Menu Brownies"
+          >
+            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+              <Flame className="w-3 h-3 text-amber-300" />
+              <span>Menu Brownies</span>
+            </span>
+          </button>
+
+          {/* Karakter Anggota Tim */}
+          {teamMembers.map((member, index) => {
+            const isHovered = hoveredMemberId === member.id;
+            const favoriteSlugMap: Record<string, string> = {
+              'team-1': 'classic-chocochip-cookie',
+              'team-2': 'fudgy-shiny-crust-brownies',
+              'team-3': 'dubai-chewy-cookies-pistachio',
+              'team-4': 'dimsum-ayam-udang',
+              'team-5': 'lotus-biscoff-dessert-box',
+            };
+            const favoriteProduct =
+              products.find(
+                (p) =>
+                  p.id === member.favoriteProductId ||
+                  p.slug === favoriteSlugMap[member.id]
+              ) || products[index % Math.max(products.length, 1)];
+
+            const bubblePositionClass =
+              index === 0
+                ? 'left-0'
+                : index === teamMembers.length - 1
+                ? 'right-0'
+                : 'left-1/2 -translate-x-1/2';
+
+            const tailPositionClass =
+              index === 0
+                ? 'left-10'
+                : index === teamMembers.length - 1
+                ? 'right-12'
+                : 'left-1/2 -translate-x-1/2';
+
+            return (
               <div
-                className={`w-full h-full rounded-xl transition-all flex items-end justify-center p-1 ${
-                  showHotspots
-                    ? 'ring-2 ring-amber-500 bg-amber-400/20 hover:bg-amber-400/35'
-                    : 'hover:ring-2 hover:ring-white/80 hover:bg-white/10'
+                key={member.id}
+                style={{
+                  left: member.left,
+                  top: member.top,
+                  width: member.width,
+                  height: member.height,
+                }}
+                onMouseEnter={() => {
+                  setHoveredMemberId(member.id);
+                  onSelectMember(member);
+                }}
+                onMouseLeave={() => setHoveredMemberId(null)}
+                onClick={() => {
+                  setHoveredMemberId((prev) =>
+                    prev === member.id ? null : member.id
+                  );
+                  onSelectMember(member);
+                }}
+                className={`absolute cursor-pointer select-none ${
+                  isHovered ? 'z-30' : 'z-10'
                 }`}
               >
-                {showHotspots && (
-                  <span className="translate-y-6 bg-[#5C3A21] text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-md whitespace-nowrap">
-                    Pesan di Sini
-                  </span>
-                )}
-              </div>
-            </button>
-
-            {/* HOTSPOT 2: Papan "MENU AJCULICIOUS" */}
-            <button
-              type="button"
-              suppressHydrationWarning
-              onClick={() => onFilterCategory('all')}
-              style={{ left: '29.8%', top: '9%', width: '26.2%', height: '20.5%' }}
-              className="absolute group focus:outline-none"
-              title="Lihat Papan Menu AJCUlicious"
-            >
-              <div
-                className={`w-full h-full rounded-xl transition-all flex items-center justify-center ${
-                  showHotspots
-                    ? 'ring-2 ring-amber-500 bg-amber-400/15 hover:bg-amber-400/30'
-                    : 'hover:ring-2 hover:ring-white/80 hover:bg-white/10'
-                }`}
-              >
-                {showHotspots && (
-                  <span className="bg-[#5C3A21]/95 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1.5 border border-[#E6D8C7]/50">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    Papan Menu AJCUlicious
-                  </span>
-                )}
-              </div>
-            </button>
-
-            {/* HOTSPOT 3: Etalase Kaca Cookies & Brownies */}
-            <button
-              type="button"
-              suppressHydrationWarning
-              onClick={() => onFilterCategory('dubai-cookies')}
-              style={{ left: '18.8%', top: '48.5%', width: '22%', height: '24%' }}
-              className="absolute group focus:outline-none"
-              title="Buka Menu Cookies & Brownies"
-            >
-              <div
-                className={`w-full h-full rounded-2xl transition-all flex items-center justify-center ${
-                  showHotspots
-                    ? 'ring-2 ring-amber-400 bg-amber-500/20 hover:bg-amber-500/35'
-                    : 'hover:ring-2 hover:ring-amber-300 hover:bg-amber-500/10'
-                }`}
-              >
-                {showHotspots && (
-                  <span className="bg-[#5C3A21]/95 text-[#FEF3C7] text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1.5 border border-[#E6D8C7]/40">
-                    <Cookie className="w-3.5 h-3.5 text-amber-300" />
-                    Etalase Cookies &amp; Brownies
-                  </span>
-                )}
-              </div>
-            </button>
-
-            {/* HOTSPOT 4: Kukusan Dimsum Bambu */}
-            <button
-              type="button"
-              suppressHydrationWarning
-              onClick={() => onFilterCategory('dimsum')}
-              style={{ left: '53.8%', top: '56%', width: '11.5%', height: '17%' }}
-              className="absolute group focus:outline-none"
-              title="Buka Menu Dimsum Hangat"
-            >
-              <div
-                className={`w-full h-full rounded-2xl transition-all flex items-center justify-center ${
-                  showHotspots
-                    ? 'ring-2 ring-orange-500 bg-orange-500/20 hover:bg-orange-500/35'
-                    : 'hover:ring-2 hover:ring-orange-300 hover:bg-orange-500/10'
-                }`}
-              >
-                {showHotspots && (
-                  <span className="bg-[#7C2D12]/95 text-orange-100 text-xs font-bold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1">
-                    <UtensilsCrossed className="w-3 h-3 text-orange-300" />
-                    Kukusan Dimsum
-                  </span>
-                )}
-              </div>
-            </button>
-
-            {/* HOTSPOT 5: Tumpukan Kotak Dus Kemasan AJCUlicious */}
-            <button
-              type="button"
-              suppressHydrationWarning
-              onClick={onOpenOrderTracker}
-              style={{ left: '66%', top: '49%', width: '19%', height: '23%' }}
-              className="absolute group focus:outline-none"
-              title="Cek Status Box & Pickup Kampus"
-            >
-              <div
-                className={`w-full h-full rounded-2xl transition-all flex items-center justify-center ${
-                  showHotspots
-                    ? 'ring-2 ring-sky-400 bg-sky-500/20 hover:bg-sky-500/35'
-                    : 'hover:ring-2 hover:ring-sky-300 hover:bg-sky-500/10'
-                }`}
-              >
-                {showHotspots && (
-                  <span className="bg-[#0F172A]/90 text-sky-100 text-xs font-bold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1 border border-sky-300/30">
-                    <PackageCheck className="w-3.5 h-3.5 text-sky-300" />
-                    Box &amp; Cek Invoice
-                  </span>
-                )}
-              </div>
-            </button>
-
-            {/* HOTSPOT 6: Oven Kue Kanan */}
-            <button
-              type="button"
-              suppressHydrationWarning
-              onClick={() => onFilterCategory('brownies')}
-              style={{ left: '85.5%', top: '46.5%', width: '13.8%', height: '25.5%' }}
-              className="absolute group focus:outline-none"
-              title="Fresh dari Oven"
-            >
-              <div
-                className={`w-full h-full rounded-2xl transition-all flex items-center justify-center ${
-                  showHotspots
-                    ? 'ring-2 ring-rose-400 bg-rose-500/20 hover:bg-rose-500/35'
-                    : 'hover:ring-2 hover:ring-rose-300 hover:bg-rose-500/10'
-                }`}
-              >
-                {showHotspots && (
-                  <span className="bg-[#4C1D95]/90 text-rose-100 text-xs font-bold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1 border border-rose-300/30">
-                    <Flame className="w-3.5 h-3.5 text-amber-300" />
-                    Fresh dari Oven
-                  </span>
-                )}
-              </div>
-            </button>
-
-            {/* HOTSPOTS 7-11: Karakter Anggota Tim (Tim #1 s.d. Tim #5) */}
-            {teamMembers.map((member, index) => {
-              const isSelected = activeMember?.id === member.id;
-              return (
-                <button
-                  key={member.id}
-                  type="button"
-                  suppressHydrationWarning
-                  onClick={() => onSelectMember(member)}
-                  style={{
-                    left: member.left,
-                    top: member.top,
-                    width: member.width,
-                    height: member.height,
-                  }}
-                  className="absolute group focus:outline-none"
-                  title={`Klik untuk sapa ${member.name}`}
-                >
+                {isHovered && (
                   <div
-                    className={`w-full h-full rounded-2xl transition-all flex items-start justify-center pt-1 ${
-                      isSelected
-                        ? 'ring-3 ring-white bg-white/30 shadow-lg'
-                        : showHotspots
-                        ? 'ring-2 ring-white/80 bg-white/10 hover:bg-white/25'
-                        : 'hover:ring-2 hover:ring-white/80 hover:bg-white/15'
-                    }`}
+                    onClick={(e) => e.stopPropagation()}
+                    className={`absolute bottom-full pb-2.5 ${bubblePositionClass} w-72 sm:w-80 z-40 animate-in fade-in zoom-in-95 duration-150`}
                   >
-                    {(showHotspots || isSelected) && (
-                      <span
-                        className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow-md transition-all ${
-                          isSelected
-                            ? 'bg-[#5C3A21] text-white scale-110 ring-2 ring-white'
-                            : 'bg-white/95 text-[#5C3A21] hover:scale-105'
-                        }`}
-                      >
-                        Tim #{index + 1}
-                      </span>
-                    )}
+                    <div className="relative bg-white border border-[#D8C2A8] rounded-2xl p-3 shadow-xl text-left space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-xs text-[#3B2618]">
+                          {member.name}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FAF6F0] text-[#7D5E46] font-medium border border-[#EADFD3]">
+                          {member.role}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-[#5C3A21] leading-relaxed">
+                        &ldquo;{member.greeting}&rdquo;
+                      </p>
+
+                      {favoriteProduct && (
+                        <div className="pt-1.5 border-t border-[#F2E8DC] flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-bold text-[11px] text-[#3B2618] truncate">
+                              {favoriteProduct.emoji} {favoriteProduct.name}
+                            </p>
+                            <span className="text-[10px] font-semibold text-[#7D5E46]">
+                              {formatRupiah(favoriteProduct.price)}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            suppressHydrationWarning
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAddToCart(favoriteProduct);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#5C3A21] text-white text-[10px] font-bold hover:bg-[#462B18] active:scale-95 transition-all shrink-0"
+                          >
+                            {addedToastProduct === favoriteProduct.id ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-300" />
+                                <span>Ditambah</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="w-3 h-3" />
+                                <span>Tambah</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      <div
+                        className={`w-3 h-3 bg-white border-r border-b border-[#D8C2A8] rotate-45 absolute -bottom-1.5 ${tailPositionClass}`}
+                      />
+                    </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* KARTU REKOMENDASI STAF (Tepat di Bawah Konter - Persis Sesuai Gambar 2) */}
-      <div className="bg-[#FFFDF9] border border-[#E6D8C7] rounded-3xl p-4 sm:p-5 shadow-xs transition-all">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          {/* Sisi Kiri: Avatar & Info Anggota Tim */}
-          <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-[#5C3A21] text-white flex items-center justify-center shrink-0 shadow-xs border border-[#E6D8C7]">
-              <Users className="w-6 h-6 text-[#FAF6F0]" />
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-extrabold text-base text-[#3B2618]">
-                  {activeMember.name}
-                </span>
-                {/* Badge Role (Beige #F2E8DC / text #5C3A21) */}
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F2E8DC] text-[#5C3A21] font-semibold border border-[#E6D8C7]">
-                  {activeMember.badge}
-                </span>
-                <span className="text-xs text-[#7D5E46]">
-                  ({activeMember.description})
-                </span>
-              </div>
-
-              {/* Kutipan Personal Staf */}
-              <p className="text-sm text-[#462B18] italic leading-relaxed">
-                &ldquo;{activeMember.greeting}&rdquo;
-              </p>
-            </div>
-          </div>
-
-          {/* Sisi Kanan: Kotak Inner Beige Rekomendasi Menu & Tombol Tambah */}
-          {favoriteProduct && (
-            <div className="w-full md:w-auto flex items-center justify-between gap-3 bg-[#F2E8DC] border border-[#E6D8C7] rounded-2xl px-4 py-3 shrink-0 shadow-2xs">
-              <div className="text-xs pr-2">
-                <span className="text-[#7D5E46] font-medium block">
-                  Rekomendasi Menu:
-                </span>
-                <span className="font-bold text-sm text-[#3B2618]">
-                  {favoriteProduct.emoji} {favoriteProduct.name}{' '}
-                  <span className="text-[#5C3A21]">
-                    ({formatRupiah(favoriteProduct.price)})
-                  </span>
-                </span>
-              </div>
-
-              <button
-                type="button"
-                suppressHydrationWarning
-                onClick={() => onAddToCart(favoriteProduct)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5C3A21] text-white text-xs font-bold hover:bg-[#462B18] active:scale-95 transition-all shadow-sm shrink-0"
-              >
-                {addedToastProduct === favoriteProduct.id ? (
-                  <>
-                    <Check className="w-4 h-4 text-emerald-300" />
-                    <span>Ditambahkan!</span>
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-4 h-4" />
-                    <span>+ Tambah</span>
-                  </>
                 )}
-              </button>
-            </div>
-          )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -15,9 +15,11 @@ export interface Product {
   price: number;
   stockQuota: number;
   originalQuota: number;
-  badges: string[]; // e.g. ['Cookies', 'Favorit Kampus', 'Premium Ingredient']
+  badges: string[];
   description: string;
   emoji: string;
+  imageUrl?: string | null;
+  ingredients?: string[];
   isActive: boolean;
 }
 

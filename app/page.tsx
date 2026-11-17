@@ -1,5 +1,30 @@
 import { Suspense } from 'react';
+import type { Metadata } from 'next';
 import AjculiciousInteractiveStore from '@/components/ajculicious_interactive_store';
+import { getStorefrontInitialData } from '@/actions/catalog-actions';
+
+export const metadata: Metadata = {
+  title: 'AJCUlicious — Cookies, Dubai Chewy Cookies, Brownies & Dimsum',
+  description:
+    'Pre-Order Cookies, Dubai Chewy Cookies Pistachio, Fudgy Shiny Crust Brownies, Dessert Box, dan Dimsum Hangat.',
+  openGraph: {
+    title: 'AJCUlicious — Homemade Cookies, Brownies & Dimsum',
+    description:
+      'Katalog Pre-Order Batch AJCUlicious: Dubai Chewy Cookies Pistachio, Soft Cookies, Fudgy Brownies, dan Dimsum Hangat.',
+    images: ['/images/storefront-counter.jpg'],
+  },
+};
+
+async function StorefrontLoader() {
+  const { products, reviews, batchConfig } = await getStorefrontInitialData();
+  return (
+    <AjculiciousInteractiveStore
+      initialProducts={products}
+      initialReviews={reviews}
+      initialBatchConfig={batchConfig}
+    />
+  );
+}
 
 export default function Home() {
   return (
@@ -10,7 +35,7 @@ export default function Home() {
         </div>
       }
     >
-      <AjculiciousInteractiveStore />
+      <StorefrontLoader />
     </Suspense>
   );
 }

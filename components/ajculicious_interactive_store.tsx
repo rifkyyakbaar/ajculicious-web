@@ -11,6 +11,7 @@ import BuyerOrderTrackerModal from './BuyerOrderTrackerModal';
 import AdminLoginModal from './AdminLoginModal';
 import AdminDashboardView from './AdminDashboardView';
 import Footer from './Footer';
+import OnboardingTour, { TourStep } from './OnboardingTour';
 
 import {
   Product,
@@ -23,40 +24,55 @@ import {
   CategorySlug,
   OrderStatus,
 } from '../types/ajculicious';
+import { AdminUserProfile } from '../types/database';
 
 import {
-  INITIAL_PRODUCTS,
   TEAM_MEMBERS,
-  INITIAL_ORDERS,
-  INITIAL_REVIEWS,
-  INITIAL_EXPENSES,
   INITIAL_BATCH_CONFIG,
 } from '../data/initial_data';
+import { submitCustomerReview } from '../actions/order-actions';
+import { getStorefrontInitialData } from '../actions/catalog-actions';
 
-export default function AjculiciousInteractiveStore() {
+interface AjculiciousInteractiveStoreProps {
+  initialProducts?: Product[];
+  initialReviews?: ReviewRecord[];
+  initialBatchConfig?: BatchPOConfig;
+  initialCategory?: CategorySlug;
+  openTrackerInitially?: boolean;
+}
+
+export default function AjculiciousInteractiveStore({
+  initialProducts = [],
+  initialReviews = [],
+  initialBatchConfig = INITIAL_BATCH_CONFIG,
+  initialCategory = 'all',
+  openTrackerInitially = false,
+}: AjculiciousInteractiveStoreProps = {}) {
   const [isMounted, setIsMounted] = useState<boolean>(false);
 
   // App View & Auth State
   const [currentView, setCurrentView] = useState<'store' | 'admin'>('store');
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
+  const [adminProfile, setAdminProfile] = useState<AdminUserProfile | null>(null);
 
-  // State Initialization (with localStorage hydration check)
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  // Seluruh data (products, reviews, batchConfig) berasal 100% dinamis dari Database Supabase
+  const [products, setProducts] = useState<Product[]>(initialProducts);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [orders, setOrders] = useState<OrderRecord[]>(INITIAL_ORDERS);
-  const [reviews, setReviews] = useState<ReviewRecord[]>(INITIAL_REVIEWS);
-  const [expenses, setExpenses] = useState<ExpenseRecord[]>(INITIAL_EXPENSES);
-  const [batchConfig, setBatchConfig] = useState<BatchPOConfig>(INITIAL_BATCH_CONFIG);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [reviews, setReviews] = useState<ReviewRecord[]>(initialReviews);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [batchConfig, setBatchConfig] = useState<BatchPOConfig>(initialBatchConfig);
 
   // UI Interactive States
-  const [showHotspots, setShowHotspots] = useState<boolean>(true);
-  // Default active team member: Tim #3 (Anggota 3 - Resep & Menu) sesuai referensi gambar
   const [activeTeamMember, setActiveTeamMember] = useState<TeamMember>(TEAM_MEMBERS[2]);
-  const [activeCategory, setActiveCategory] = useState<CategorySlug>('all');
+  const [activeCategory, setActiveCategory] = useState<CategorySlug>(initialCategory);
+  const [tourStep, setTourStep] = useState<TourStep>(
+    openTrackerInitially ? null : 'welcome'
+  );
 
   // Modals
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [isBuyerTrackerOpen, setIsBuyerTrackerOpen] = useState(false);
+  const [isBuyerTrackerOpen, setIsBuyerTrackerOpen] = useState(openTrackerInitially);
   const [buyerTrackerInvoiceCode, setBuyerTrackerInvoiceCode] = useState('');
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
   const [addedToastProductId, setAddedToastProductId] = useState<string | null>(null);
@@ -69,28 +85,28 @@ export default function AjculiciousInteractiveStore() {
       if (storedAuth === 'true') {
         setIsAdminLoggedIn(true);
       }
-
-      const storedOrders = localStorage.getItem('ajc_orders');
-      if (storedOrders) setOrders(JSON.parse(storedOrders));
+      const storedProfile = localStorage.getItem('ajc_admin_profile');
+      if (storedProfile) {
+        setAdminProfile(JSON.parse(storedProfile));
+      }
 
       const storedCart = localStorage.getItem('ajc_cart');
       if (storedCart) setCart(JSON.parse(storedCart));
-
-      const storedProducts = localStorage.getItem('ajc_products');
-      if (storedProducts) setProducts(JSON.parse(storedProducts));
-
-      const storedReviews = localStorage.getItem('ajc_reviews');
-      if (storedReviews) setReviews(JSON.parse(storedReviews));
-
-      const storedExpenses = localStorage.getItem('ajc_expenses');
-      if (storedExpenses) setExpenses(JSON.parse(storedExpenses));
-
-      const storedBatch = localStorage.getItem('ajc_batch');
-      if (storedBatch) setBatchConfig(JSON.parse(storedBatch));
     } catch {
-      // Fallback to initial data if localStorage error
+      // Fallback if localStorage error
     }
+
+    // Selalu sinkronkan data terbaru dari Database Supabase saat komponen dimuat
+    getStorefrontInitialData().then((fresh) => {
+      if (fresh.products.length > 0) setProducts(fresh.products);
+      setReviews(fresh.reviews);
+      setBatchConfig(fresh.batchConfig);
+    });
   }, []);
+
+  const handleCloseOrFinishTour = () => {
+    setTourStep(null);
+  };
 
   // Sync state changes to localStorage only after mounted
   useEffect(() => {
@@ -146,15 +162,14 @@ export default function AjculiciousInteractiveStore() {
     [cart]
   );
 
-  // Cart Handlers
+  // Cart Handlers (Sistem Pre-Order: Tanpa Batas Stok)
   const handleAddToCart = (product: Product) => {
-    if (product.stockQuota <= 0) return;
+    if (!product.isActive) return;
 
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product.id === product.id);
       if (existingIndex > -1) {
         const currentQty = prev[existingIndex].quantity;
-        if (currentQty >= product.stockQuota) return prev;
         const updated = [...prev];
         updated[existingIndex] = {
           ...updated[existingIndex],
@@ -165,7 +180,6 @@ export default function AjculiciousInteractiveStore() {
       return [...prev, { product, quantity: 1 }];
     });
 
-    // Show temporary feedback toast on product card
     setAddedToastProductId(product.id);
     setTimeout(() => setAddedToastProductId(null), 1500);
   };
@@ -177,7 +191,6 @@ export default function AjculiciousInteractiveStore() {
           if (item.product.id === productId) {
             const newQty = item.quantity + delta;
             if (newQty <= 0) return null;
-            if (newQty > item.product.stockQuota) return item;
             return { ...item, quantity: newQty };
           }
           return item;
@@ -194,22 +207,9 @@ export default function AjculiciousInteractiveStore() {
     setCart([]);
   };
 
-  // Order Placement Handler: Deducts quota real-time & prepends to orders
+  // Order Placement Handler
   const handleOrderCreated = (newOrder: OrderRecord) => {
-    // 1. Add to orders history
     setOrders((prev) => [newOrder, ...prev]);
-
-    // 2. Reduce product stock quota real-time
-    setProducts((prev) =>
-      prev.map((prod) => {
-        const orderedItem = newOrder.items.find((it) => it.productId === prod.id);
-        if (orderedItem) {
-          const updatedQuota = Math.max(0, prod.stockQuota - orderedItem.quantity);
-          return { ...prod, stockQuota: updatedQuota };
-        }
-        return prod;
-      })
-    );
   };
 
   // Upload Transfer Proof Handler
@@ -227,16 +227,20 @@ export default function AjculiciousInteractiveStore() {
     );
   };
 
-  // Review Submission Handler
-  const handleSubmitReview = (
+  // Review Submission Handler (Langsung tersimpan ke Tabel `reviews` di Database Supabase)
+  const handleSubmitReview = async (
     newRev: Omit<ReviewRecord, 'id' | 'isApproved'>
   ) => {
-    const createdReview: ReviewRecord = {
-      ...newRev,
-      id: `rev-${Date.now()}`,
-      isApproved: true, // auto approve in demo
-    };
-    setReviews((prev) => [createdReview, ...prev]);
+    const res = await submitCustomerReview({
+      customerName: newRev.customerName,
+      faculty: newRev.faculty,
+      rating: newRev.rating,
+      menuOrdered: newRev.menuOrdered,
+      comment: newRev.comment,
+    });
+    if (res.success && res.data) {
+      setReviews((prev) => [res.data!, ...prev]);
+    }
   };
 
   // Admin Order Status Update
@@ -247,19 +251,25 @@ export default function AjculiciousInteractiveStore() {
   };
 
   // Admin Auth Handlers
-  const handleAdminLoginSuccess = () => {
+  const handleAdminLoginSuccess = (profile?: AdminUserProfile) => {
     setIsAdminLoggedIn(true);
+    if (profile) setAdminProfile(profile);
     setCurrentView('admin');
     try {
       localStorage.setItem('ajc_admin_auth', 'true');
+      if (profile) {
+        localStorage.setItem('ajc_admin_profile', JSON.stringify(profile));
+      }
     } catch {}
   };
 
   const handleAdminLogout = () => {
     setIsAdminLoggedIn(false);
+    setAdminProfile(null);
     setCurrentView('store');
     try {
       localStorage.removeItem('ajc_admin_auth');
+      localStorage.removeItem('ajc_admin_profile');
     } catch {}
   };
 
@@ -281,10 +291,11 @@ export default function AjculiciousInteractiveStore() {
   if (currentView === 'admin' && isAdminLoggedIn) {
     return (
       <AdminDashboardView
+        adminProfile={adminProfile}
         onBackToStore={() => setCurrentView('store')}
         onLogout={handleAdminLogout}
         products={products}
-        onUpdateProducts={(prods) => setProducts(prods)}
+        onUpdateProducts={setProducts}
         orders={orders}
         onUpdateOrderStatus={handleUpdateOrderStatus}
         expenses={expenses}
@@ -295,7 +306,7 @@ export default function AjculiciousInteractiveStore() {
           setExpenses((prev) => prev.filter((e) => e.id !== id))
         }
         batchConfig={batchConfig}
-        onUpdateBatchConfig={(conf) => setBatchConfig(conf)}
+        onUpdateBatchConfig={setBatchConfig}
       />
     );
   }
@@ -306,33 +317,32 @@ export default function AjculiciousInteractiveStore() {
       className="min-h-screen bg-[#FAF6F0] text-[#3B2618] flex flex-col font-sans selection:bg-[#F2E8DC] selection:text-[#5C3A21]"
       suppressHydrationWarning
     >
-      {/* 3.A. Sticky Top Navbar (Cleaned: Focused Strictly on Customer Experience) */}
+      {/* 3.A. Sticky Top Navbar */}
       <Navbar
-        showHotspots={showHotspots}
-        onToggleHotspots={() => setShowHotspots((prev) => !prev)}
-        onScrollToMenu={handleScrollToMenu}
+        onOpenTour={() => setTourStep('welcome')}
+        onOpenOrderTracker={() => {
+          setBuyerTrackerInvoiceCode('');
+          setIsBuyerTrackerOpen(true);
+        }}
         cartItemCount={totalCartItems}
         cartTotalPrice={totalCartPrice}
         onOpenCart={() => setIsCartOpen(true)}
+        isTourHighlighted={tourStep === 4}
       />
 
       {/* Main Body Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 sm:space-y-8">
-        {/* 3.B. Banner Alur Pemesanan & Info Batch PO Aktif */}
+      <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-8 py-4 sm:py-6 space-y-6">
+        {/* 3.B. Bar Info Batch PO Aktif */}
         <BannerOrderFlow
           batchConfig={batchConfig}
-          onOpenOrderTracker={() => {
-            setBuyerTrackerInvoiceCode('');
-            setIsBuyerTrackerOpen(true);
-          }}
+          isTourHighlighted={tourStep === 1}
         />
 
-        {/* 3.C. Hero Interactive Storefront Counter & Kartu Rekomendasi Staf */}
+        {/* 3.C. Hero Interactive Storefront Counter */}
         <HeroCounter
           teamMembers={TEAM_MEMBERS}
           activeMember={activeTeamMember}
           onSelectMember={(member) => setActiveTeamMember(member)}
-          showHotspots={showHotspots}
           products={products}
           onAddToCart={handleAddToCart}
           onFilterCategory={handleFilterCategory}
@@ -341,6 +351,7 @@ export default function AjculiciousInteractiveStore() {
             setIsBuyerTrackerOpen(true);
           }}
           addedToastProduct={addedToastProductId}
+          isTourHighlighted={tourStep === 2}
         />
 
         {/* 3.D. Katalog Menu AJCUlicious */}
@@ -351,19 +362,18 @@ export default function AjculiciousInteractiveStore() {
           cart={cart}
           onAddToCart={handleAddToCart}
           onUpdateQuantity={handleUpdateCartQuantity}
+          isTourHighlighted={tourStep === 3}
         />
 
-        {/* 3.E. Section Testimoni & Social Proof Pelanggan */}
+        {/* 3.E. Section Testimoni & Social Proof Pelanggan (100% Dinamis dari Database) */}
         <TestimonialsSection
           reviews={reviews}
-          onOpenReviewModal={() => {
-            setBuyerTrackerInvoiceCode('');
-            setIsBuyerTrackerOpen(true);
-          }}
+          products={products}
+          onReviewsUpdated={(freshReviews) => setReviews(freshReviews)}
         />
       </main>
 
-      {/* Footer & Elegant Admin Login / Track Order Links */}
+      {/* Footer */}
       <Footer
         onOpenAdminLogin={() => {
           if (isAdminLoggedIn) {
@@ -372,10 +382,13 @@ export default function AjculiciousInteractiveStore() {
             setIsAdminLoginModalOpen(true);
           }
         }}
-        onOpenBuyerTracker={() => {
-          setBuyerTrackerInvoiceCode('');
-          setIsBuyerTrackerOpen(true);
-        }}
+      />
+
+      {/* Interactive Onboarding Step-by-Step Tour */}
+      <OnboardingTour
+        currentStep={tourStep}
+        onChangeStep={(step) => setTourStep(step)}
+        onFinishOrSkip={handleCloseOrFinishTour}
       />
 
       {/* 4.1. Drawer / Modal Keranjang & Checkout WhatsApp */}

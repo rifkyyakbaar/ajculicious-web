@@ -1,20 +1,19 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Search,
-  Copy,
-  Check,
-  Upload,
-  Clock,
   Sparkles,
   AlertCircle,
   Star,
-  CheckCircle2,
-  Package,
+  Loader2,
+  QrCode,
+  MessageCircle,
 } from 'lucide-react';
-import { OrderRecord, OrderStatus, ReviewRecord } from '../types/ajculicious';
+import { OrderRecord, ReviewRecord } from '../types/ajculicious';
+import { OrderWithItems, DbOrderStatus } from '../types/database';
+import { getOrderByInvoice } from '../actions/order-actions';
 import { OFFICIAL_INFO } from '../data/initial_data';
 import { formatRupiah } from '../utils/formatters';
 
@@ -22,7 +21,7 @@ interface BuyerOrderTrackerModalProps {
   isOpen: boolean;
   onClose: () => void;
   orders: OrderRecord[];
-  onUploadProof: (orderId: string, proofUrl: string) => void;
+  onUploadProof?: (orderId: string, proofUrl: string) => void;
   onSubmitReview: (review: Omit<ReviewRecord, 'id' | 'isApproved'>) => void;
   initialInvoiceCode?: string;
 }
@@ -30,58 +29,50 @@ interface BuyerOrderTrackerModalProps {
 export default function BuyerOrderTrackerModal({
   isOpen,
   onClose,
-  orders,
-  onUploadProof,
   onSubmitReview,
   initialInvoiceCode = '',
 }: BuyerOrderTrackerModalProps) {
-  const [searchInvoice, setSearchInvoice] = useState(initialInvoiceCode);
-  const [hasSearched, setHasSearched] = useState(Boolean(initialInvoiceCode));
-  const [copiedBank, setCopiedBank] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState(initialInvoiceCode);
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [foundOrders, setFoundOrders] = useState<OrderWithItems[]>([]);
 
-  // Upload proof local state
-  const [proofPreviewUrl, setProofPreviewUrl] = useState<string>('');
-  const [isUploadingProof, setIsUploadingProof] = useState(false);
-
-  // Review state
-  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewOrderId, setReviewOrderId] = useState<string | null>(null);
   const [reviewName, setReviewName] = useState('');
   const [reviewFaculty, setReviewFaculty] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSuccess, setReviewSuccess] = useState(false);
 
+  useEffect(() => {
+    if (isOpen && initialInvoiceCode.trim()) {
+      setSearchQuery(initialInvoiceCode);
+      handleSearch(initialInvoiceCode);
+    }
+  }, [isOpen, initialInvoiceCode]);
+
   if (!isOpen) return null;
 
-  // Find exact or closest matching single order
-  const matchedOrder = orders.find((o) => {
-    const q = searchInvoice.trim().toLowerCase().replace('#', '');
-    if (!q) return false;
-    return o.invoiceCode.toLowerCase() === q || o.invoiceCode.toLowerCase().includes(q);
-  });
-
-  const handleCopy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedBank(label);
-    setTimeout(() => setCopiedBank(null), 2000);
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProofPreviewUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  const handleSearch = async (queryText: string) => {
+    const q = queryText.trim();
+    if (!q || q.length < 2) {
+      setSearchError('Masukkan minimal 2 karakter Kode Invoice atau Nama.');
+      return;
     }
-  };
 
-  const handleConfirmProof = (orderId: string) => {
-    if (!proofPreviewUrl) return;
-    onUploadProof(orderId, proofPreviewUrl);
-    setIsUploadingProof(false);
-    setProofPreviewUrl('');
+    setIsSearching(true);
+    setSearchError('');
+    setHasSearched(true);
+
+    const res = await getOrderByInvoice(q);
+    if (!res.success) {
+      setSearchError(res.error || 'Gagal mencari pesanan.');
+      setFoundOrders([]);
+    } else {
+      setFoundOrders(res.data ?? []);
+    }
+    setIsSearching(false);
   };
 
   const handleSendReview = (e: React.FormEvent, menuOrdered: string) => {
@@ -90,7 +81,7 @@ export default function BuyerOrderTrackerModal({
 
     onSubmitReview({
       customerName: reviewName.trim(),
-      faculty: reviewFaculty.trim() || 'Mahasiswa Kampus',
+      faculty: reviewFaculty.trim() || 'Pelanggan',
       rating: reviewRating,
       menuOrdered,
       comment: reviewComment.trim(),
@@ -103,46 +94,34 @@ export default function BuyerOrderTrackerModal({
 
     setReviewSuccess(true);
     setTimeout(() => {
-      setShowReviewForm(false);
+      setReviewOrderId(null);
       setReviewSuccess(false);
-    }, 2500);
+    }, 2000);
   };
 
-  const getStatusBadge = (status: OrderStatus) => {
+  const getDbStatusBadge = (status: DbOrderStatus) => {
     switch (status) {
-      case 'MENUNGGU_PEMBAYARAN':
+      case 'PENDING':
         return (
-          <span className="text-xs px-3 py-1 rounded-full bg-amber-100 text-amber-900 font-bold border border-amber-200">
-            Menunggu Pembayaran
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-semibold border border-amber-200">
+            Diproses
           </span>
         );
-      case 'MENUNGGU_VERIFIKASI':
+      case 'SIAP_DIAMBIL':
         return (
-          <span className="text-xs px-3 py-1 rounded-full bg-sky-100 text-sky-800 font-bold border border-sky-200">
-            Bukti Terkirim &bull; Menunggu Verifikasi
-          </span>
-        );
-      case 'LUNAS_PRODUKSI':
-        return (
-          <span className="text-xs px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
-            Lunas &bull; Sedang Diproduksi Dapur
-          </span>
-        );
-      case 'READY_PICKUP':
-        return (
-          <span className="text-xs px-3 py-1 rounded-full bg-[#DCFCE7] text-[#166534] font-extrabold border border-emerald-400 shadow-2xs animate-pulse">
-            Ready to Pick Up! (Siap Diambil)
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-300">
+            Siap Diambil
           </span>
         );
       case 'SELESAI':
         return (
-          <span className="text-xs px-3 py-1 rounded-full bg-emerald-600 text-white font-bold">
-            Selesai Diambil
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold">
+            Selesai
           </span>
         );
-      case 'DITOLAK':
+      case 'BATAL':
         return (
-          <span className="text-xs px-3 py-1 rounded-full bg-rose-100 text-rose-700 font-bold border border-rose-200">
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-600 font-semibold border border-rose-200">
             Dibatalkan
           </span>
         );
@@ -150,380 +129,288 @@ export default function BuyerOrderTrackerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-      <div className="bg-[#FFFDF9] border border-[#E6D8C7] rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-lg w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
-        <div className="px-5 py-4 bg-[#FAF6F0] border-b border-[#E6D8C7] flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-[#5C3A21] text-white flex items-center justify-center font-bold text-sm">
-              AJC
-            </div>
-            <div>
-              <h3 className="font-extrabold text-base text-[#3B2618]">
-                Lacak Kode Pesanan Saya
-              </h3>
-              <p className="text-xs text-[#7D5E46]">
-                Khusus melihat status 1 pesanan Anda dan konfirmasi pembayaran
-              </p>
-            </div>
+        <div className="px-5 py-4 border-b border-[#EADFD3] flex items-center justify-between">
+          <div>
+            <h3 className="font-extrabold text-base text-[#3B2618]">
+              Cek Status Pesanan
+            </h3>
+            <p className="text-xs text-[#8C6D53]">
+              Cari dengan Kode Invoice atau Nama Pemesan
+            </p>
           </div>
 
           <button
             type="button"
             suppressHydrationWarning
             onClick={onClose}
-            className="p-2 rounded-full bg-white hover:bg-[#F2E8DC] text-[#3B2618] border border-[#E6D8C7] transition"
+            className="p-2 rounded-full hover:bg-[#FAF6F0] text-[#3B2618] transition"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Input Pencarian Invoice Khusus Milik Pembeli */}
-        <div className="p-4 border-b border-[#E6D8C7] bg-[#FFFDF9]">
+        {/* Search Input */}
+        <div className="p-4 border-b border-[#F4ECE1] bg-[#FAF6F0]/50">
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              setHasSearched(true);
+              handleSearch(searchQuery);
             }}
             className="flex gap-2"
           >
             <div className="relative flex-1">
-              <Search className="w-4 h-4 text-[#8C6D53] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-[#8C6D53] absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 suppressHydrationWarning
-                value={searchInvoice}
-                onChange={(e) => {
-                  setSearchInvoice(e.target.value);
-                  setHasSearched(true);
-                }}
-                placeholder="Ketik Kode Invoice (misal: AJC-261117-001)..."
-                className="w-full pl-9 pr-4 py-2.5 rounded-2xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618] focus:outline-none focus:ring-2 focus:ring-[#5C3A21] shadow-2xs font-mono font-medium"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Contoh: AJC-261117-001 atau Nama..."
+                className="w-full pl-9 pr-4 py-2 rounded-xl border border-[#EADFD3] bg-white text-xs text-[#3B2618] focus:outline-none focus:ring-2 focus:ring-[#5C3A21]"
                 required
               />
             </div>
             <button
               type="submit"
+              disabled={isSearching}
               suppressHydrationWarning
-              className="px-4 py-2.5 rounded-2xl bg-[#5C3A21] text-white font-bold text-xs hover:bg-[#462B18] transition"
+              className="px-4 py-2 rounded-xl bg-[#5C3A21] text-white font-semibold text-xs hover:bg-[#462B18] disabled:opacity-60 transition"
             >
-              Cari
+              {isSearching ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                'Cari'
+              )}
             </button>
           </form>
         </div>
 
-        {/* Body: Single Order Card Only */}
-        <div className="p-5 overflow-y-auto space-y-4 flex-1">
-          {!hasSearched || !searchInvoice.trim() ? (
-            <div className="text-center py-10 bg-[#FAF6F0] rounded-3xl border border-[#E6D8C7] p-6 space-y-2">
-              <div className="w-12 h-12 rounded-full bg-[#F2E8DC] text-[#5C3A21] flex items-center justify-center mx-auto mb-2">
-                <Search className="w-6 h-6" />
-              </div>
-              <p className="text-sm font-bold text-[#3B2618]">
-                Masukkan Kode Invoice Pesanan Anda
+        {/* Results */}
+        <div className="p-5 overflow-y-auto space-y-3.5 flex-1">
+          {searchError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{searchError}</span>
+            </div>
+          )}
+
+          {!hasSearched ? (
+            <div className="text-center py-10 space-y-1.5">
+              <Search className="w-7 h-7 text-[#C4A98E] mx-auto" />
+              <p className="text-xs font-semibold text-[#3B2618]">
+                Masukkan Kode Invoice atau Nama Anda
               </p>
-              <p className="text-xs text-[#7D5E46] max-w-sm mx-auto leading-relaxed">
-                Kode invoice dapat dilihat di pesan konfirmasi WhatsApp yang Anda kirimkan saat checkout (format: <code>AJC-XXXXXX-XXX</code>).
+              <p className="text-[11px] text-[#8C6D53]">
+                Contoh kode: <code>AJC-261117-001</code>
               </p>
             </div>
-          ) : !matchedOrder ? (
-            <div className="text-center py-10 bg-rose-50 rounded-3xl border border-rose-200 p-6 space-y-2">
-              <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
-              <p className="text-sm font-bold text-rose-800">
-                Pesanan Tidak Ditemukan
+          ) : isSearching ? (
+            <div className="text-center py-10 space-y-2">
+              <Loader2 className="w-6 h-6 animate-spin text-[#5C3A21] mx-auto" />
+              <p className="text-xs text-[#8C6D53]">Mencari pesanan...</p>
+            </div>
+          ) : foundOrders.length === 0 ? (
+            <div className="text-center py-10 space-y-1.5">
+              <AlertCircle className="w-7 h-7 text-rose-400 mx-auto" />
+              <p className="text-xs font-bold text-[#3B2618]">
+                Pesanan tidak ditemukan
               </p>
-              <p className="text-xs text-rose-700 max-w-sm mx-auto leading-relaxed">
-                Tidak ada pesanan dengan kode invoice <strong>&ldquo;{searchInvoice}&rdquo;</strong>. Mohon periksa kembali huruf dan angka kode invoice Anda.
+              <p className="text-[11px] text-[#8C6D53]">
+                Pastikan kode invoice atau nama sudah benar.
               </p>
             </div>
           ) : (
-            /* ================= TAMPILKAN 1 PESANAN MILIK PEMBELI ================= */
-            <div className="p-5 rounded-3xl border-2 border-[#E6D8C7] bg-white space-y-4 shadow-sm">
-              {/* Header Single Order */}
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E6D8C7]/60 pb-3">
-                <div>
-                  <span className="font-mono font-black text-sm text-[#5C3A21] bg-[#F2E8DC] px-2.5 py-1 rounded-lg border border-[#E6D8C7]">
-                    #{matchedOrder.invoiceCode}
-                  </span>
-                  <h4 className="font-extrabold text-base text-[#3B2618] mt-1.5">
-                    Pesanan a.n. {matchedOrder.customerName}
-                  </h4>
-                  <span className="text-xs text-[#7D5E46]">
-                    Waktu Pesan: {matchedOrder.createdAt}
-                  </span>
-                </div>
-                <div>{getStatusBadge(matchedOrder.status)}</div>
-              </div>
-
-              {/* Rincian Titik Ambil & Bayar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-[#FAF6F0] p-3 rounded-2xl border border-[#E6D8C7]/60">
-                <div>
-                  <span className="text-[#7D5E46] block text-[11px]">Pengambilan:</span>
-                  <span className="font-bold text-[#3B2618]">
-                    {matchedOrder.pickupOption === 'kampus' ? 'Ambil di Kampus' : 'Antar Kurir'} &bull;{' '}
-                    {matchedOrder.pickupLocation}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[#7D5E46] block text-[11px]">Metode Bayar:</span>
-                  <span className="font-bold text-[#3B2618]">
-                    {matchedOrder.paymentMethod === 'COD'
-                      ? 'COD di Kampus (Tunai)'
-                      : matchedOrder.paymentMethod === 'QRIS'
-                      ? 'QRIS Statis'
-                      : `Transfer ${matchedOrder.bankChosen || 'Bank'}`}
-                  </span>
-                </div>
-              </div>
-
-              {/* Daftar Menu Pesanan */}
-              <div className="space-y-1.5 text-xs text-[#3B2618] border-b border-[#E6D8C7]/60 pb-3">
-                <span className="font-bold text-[#7D5E46] block">Daftar Menu:</span>
-                {matchedOrder.items.map((it, idx) => (
-                  <div key={idx} className="flex justify-between items-center py-1">
-                    <span>
-                      {it.quantity}x <strong>{it.productName}</strong>
-                    </span>
-                    <span className="font-bold text-[#5C3A21]">
-                      {formatRupiah(it.subtotal)}
-                    </span>
-                  </div>
-                ))}
-                <div className="pt-2 flex justify-between font-black text-sm border-t border-stone-100">
-                  <span>Total Tagihan</span>
-                  <span className="text-[#5C3A21]">{formatRupiah(matchedOrder.totalPrice)}</span>
-                </div>
-              </div>
-
-              {/* JIKA STATUS MENUNGGU PEMBAYARAN: FORM TRANSFER & UPLOAD BUKTI */}
-              {matchedOrder.status === 'MENUNGGU_PEMBAYARAN' && (
-                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-3">
-                  <div className="flex items-start gap-2">
-                    <Clock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                    <div className="text-xs text-amber-950">
-                      <p className="font-bold">Instruksi Pembayaran Transfer Bank / QRIS</p>
-                      <p className="text-[11px] mt-0.5 text-amber-800">
-                        Silakan transfer sebesar <strong>{formatRupiah(matchedOrder.totalPrice)}</strong> ke rekening resmi berikut:
-                      </p>
+            foundOrders.map((order) => (
+              <div
+                key={order.id}
+                className="p-4 rounded-2xl border border-[#EADFD3] bg-white space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-[#F4ECE1] pb-2.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-xs text-[#5C3A21] bg-[#FAF6F0] px-2 py-0.5 rounded border border-[#EADFD3]">
+                        #{order.invoice_code}
+                      </span>
+                      <span className="font-bold text-sm text-[#3B2618]">
+                        {order.customer_name}
+                      </span>
                     </div>
-                  </div>
-
-                  {/* Rekening Resmi Mandiri & BluBCA */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {OFFICIAL_INFO.bankAccounts.map((b) => (
-                      <div
-                        key={b.bankName}
-                        className="p-2.5 rounded-xl bg-white border border-amber-200 flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <p className="font-bold text-[#3B2618]">{b.bankName}</p>
-                          <p className="font-mono font-black text-xs text-[#5C3A21]">
-                            {b.accountNumber}
-                          </p>
-                          <p className="text-[10px] text-[#7D5E46]">a.n. {b.accountHolder}</p>
-                        </div>
-                        <button
-                          type="button"
-                          suppressHydrationWarning
-                          onClick={() => handleCopy(b.accountNumberRaw, b.bankName)}
-                          className="px-2.5 py-1 rounded-lg bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] font-bold text-[10px] border border-[#E6D8C7] flex items-center gap-1"
-                        >
-                          {copiedBank === b.bankName ? (
-                            <Check className="w-3 h-3 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>{copiedBank === b.bankName ? 'Disalin' : 'Salin'}</span>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Form Upload Bukti Transfer */}
-                  {isUploadingProof ? (
-                    <div className="p-3 bg-white rounded-2xl border border-amber-300 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#3B2618]">
-                          Upload Bukti Transfer (.jpg/.png)
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[11px] text-[#8C6D53]">
+                        {new Date(order.created_at).toLocaleDateString('id-ID', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}{' '}
+                        &bull; {order.payment_method}
+                      </span>
+                      {order.payment_status === 'SUDAH_BAYAR' ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+                          Sudah Bayar (Lunas)
                         </span>
-                        <button
-                          type="button"
-                          suppressHydrationWarning
-                          onClick={() => {
-                            setIsUploadingProof(false);
-                            setProofPreviewUrl('');
-                          }}
-                          className="text-xs text-stone-500"
-                        >
-                          Batal
-                        </button>
-                      </div>
-
-                      <input
-                        type="file"
-                        accept="image/png, image/jpeg, image/jpg"
-                        onChange={handleFileUpload}
-                        className="block w-full text-xs text-stone-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-[#F2E8DC] file:text-[#5C3A21] hover:file:bg-[#E6D8C7]"
-                      />
-
-                      {proofPreviewUrl && (
-                        <div className="space-y-2">
-                          <img
-                            src={proofPreviewUrl}
-                            alt="Bukti Transfer Preview"
-                            className="max-h-44 rounded-xl border border-stone-200 object-contain mx-auto"
-                          />
-                          <button
-                            type="button"
-                            suppressHydrationWarning
-                            onClick={() => handleConfirmProof(matchedOrder.id)}
-                            className="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition"
-                          >
-                            Kirim Bukti Pembayaran &amp; Ajukan Verifikasi
-                          </button>
-                        </div>
+                      ) : (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 font-semibold border border-amber-200">
+                          Belum Bayar
+                        </span>
                       )}
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      suppressHydrationWarning
-                      onClick={() => setIsUploadingProof(true)}
-                      className="w-full py-2.5 rounded-xl bg-[#5C3A21] text-white font-bold text-xs hover:bg-[#462B18] transition flex items-center justify-center gap-1.5"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Upload Bukti Transfer Sekarang</span>
-                    </button>
-                  )}
+                  </div>
+                  {getDbStatusBadge(order.status)}
                 </div>
-              )}
 
-              {/* JIKA STATUS READY TO PICK UP */}
-              {matchedOrder.status === 'READY_PICKUP' && (
-                <div className="p-4 rounded-2xl bg-[#DCFCE7] border border-emerald-300 space-y-1.5">
-                  <p className="text-xs font-bold text-[#166534] flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
-                    Pesanan Anda Sudah Ready to Pick Up di Kampus!
-                  </p>
-                  <p className="text-xs text-emerald-900 leading-relaxed">
-                    Silakan temui staf konter AJCUlicious di{' '}
-                    <strong>{matchedOrder.pickupLocation}</strong>. Sebutkan nama{' '}
-                    <strong>{matchedOrder.customerName}</strong> atau tunjukkan nomor invoice{' '}
-                    <strong>#{matchedOrder.invoiceCode}</strong>.
-                  </p>
-                </div>
-              )}
-
-              {/* JIKA STATUS SELESAI: FORM TESTIMONI */}
-              {matchedOrder.status === 'SELESAI' && (
-                <div className="pt-2">
-                  {showReviewForm ? (
-                    <form
-                      onSubmit={(e) =>
-                        handleSendReview(
-                          e,
-                          matchedOrder.items.map((i) => i.productName).join(', ')
-                        )
-                      }
-                      className="p-3.5 bg-[#FAF6F0] rounded-2xl border border-[#E6D8C7] space-y-3"
+                {/* Items */}
+                <div className="space-y-1 text-xs text-[#3B2618]">
+                  {(order.order_items ?? []).map((it) => (
+                    <div
+                      key={it.id}
+                      className="flex justify-between items-center py-0.5"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#3B2618]">
-                          Tulis Ulasan Teman Kampus
+                      <span>
+                        {it.quantity}x {it.product_name_snapshot}
+                      </span>
+                      <span className="font-semibold text-[#5C3A21]">
+                        {formatRupiah(it.subtotal)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-2 mt-1 flex justify-between font-bold text-sm border-t border-[#F4ECE1]">
+                    <span>Total</span>
+                    <span className="text-[#3B2618]">
+                      {formatRupiah(order.total_price)}
+                    </span>
+                  </div>
+                </div>
+
+                {order.status === 'PENDING' &&
+                  order.payment_method === 'QRIS' && (
+                    <div className="p-3 rounded-xl bg-[#FAF6F0] border border-[#EADFD3] flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <QrCode className="w-5 h-5 text-[#5C3A21] shrink-0" />
+                        <span className="text-[11px] text-[#6E523D]">
+                          Kirim bukti bayar QRIS via WhatsApp
                         </span>
-                        <button
-                          type="button"
-                          suppressHydrationWarning
-                          onClick={() => setShowReviewForm(false)}
-                          className="text-xs text-stone-500"
-                        >
-                          Tutup
-                        </button>
                       </div>
+                      <a
+                        href={`https://wa.me/${
+                          OFFICIAL_INFO.whatsappNumber
+                        }?text=${encodeURIComponent(
+                          `Halo Admin AJCUlicious, berikut bukti pembayaran QRIS untuk Invoice #${order.invoice_code} a.n. ${order.customer_name}.`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold text-[11px] hover:bg-emerald-700 shrink-0 flex items-center gap-1"
+                      >
+                        <MessageCircle className="w-3 h-3" />
+                        <span>WhatsApp</span>
+                      </a>
+                    </div>
+                  )}
 
-                      {reviewSuccess ? (
-                        <div className="p-3 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold text-center">
-                          Terima kasih! Ulasan Anda telah terkirim dan masuk moderasi.
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-[#7D5E46]">Rating:</span>
-                            <div className="flex items-center gap-1">
-                              {[1, 2, 3, 4, 5].map((star) => (
-                                <button
-                                  key={star}
-                                  type="button"
-                                  suppressHydrationWarning
-                                  onClick={() => setReviewRating(star)}
-                                  className="p-0.5 focus:outline-none"
-                                >
-                                  <Star
-                                    className={`w-5 h-5 ${
-                                      star <= reviewRating
-                                        ? 'fill-amber-400 text-amber-400'
-                                        : 'text-stone-300'
-                                    }`}
-                                  />
-                                </button>
-                              ))}
+                {order.status === 'SIAP_DIAMBIL' && (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      Pesanan siap diambil! Tunjukkan kode{' '}
+                      <strong>#{order.invoice_code}</strong> pada staf konter.
+                    </span>
+                  </div>
+                )}
+
+                {order.status === 'SELESAI' && (
+                  <div>
+                    {reviewOrderId === order.id ? (
+                      <form
+                        onSubmit={(e) =>
+                          handleSendReview(
+                            e,
+                            (order.order_items ?? [])
+                              .map((i) => i.product_name_snapshot)
+                              .join(', ')
+                          )
+                        }
+                        className="p-3 bg-[#FAF6F0] rounded-xl border border-[#EADFD3] space-y-2.5"
+                      >
+                        {reviewSuccess ? (
+                          <p className="text-xs font-semibold text-emerald-700 text-center py-2">
+                            Terima kasih atas ulasan Anda!
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1">
+                                {[1, 2, 3, 4, 5].map((star) => (
+                                  <button
+                                    key={star}
+                                    type="button"
+                                    onClick={() => setReviewRating(star)}
+                                  >
+                                    <Star
+                                      className={`w-4 h-4 ${
+                                        star <= reviewRating
+                                          ? 'fill-amber-400 text-amber-400'
+                                          : 'text-stone-300'
+                                      }`}
+                                    />
+                                  </button>
+                                ))}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setReviewOrderId(null)}
+                                className="text-[11px] text-[#8C6D53]"
+                              >
+                                Batal
+                              </button>
                             </div>
-                          </div>
 
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              value={reviewName}
-                              onChange={(e) => setReviewName(e.target.value)}
-                              placeholder="Nama Anda"
-                              className="px-3 py-1.5 rounded-xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618]"
-                              required
-                            />
                             <input
                               type="text"
                               value={reviewFaculty}
                               onChange={(e) => setReviewFaculty(e.target.value)}
-                              placeholder="Fakultas / Kampus"
-                              className="px-3 py-1.5 rounded-xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618]"
+                              placeholder="Fakultas / Keterangan (opsional)"
+                              className="w-full px-3 py-1.5 rounded-lg border border-[#EADFD3] bg-white text-xs"
                             />
-                          </div>
 
-                          <textarea
-                            rows={2}
-                            value={reviewComment}
-                            onChange={(e) => setReviewComment(e.target.value)}
-                            placeholder="Bagaimana rasa cookies/brownies/dimsum favoritmu?"
-                            className="w-full px-3 py-1.5 rounded-xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618]"
-                            required
-                          />
+                            <textarea
+                              rows={2}
+                              value={reviewComment}
+                              onChange={(e) => setReviewComment(e.target.value)}
+                              placeholder="Tulis ulasan singkat..."
+                              className="w-full px-3 py-1.5 rounded-lg border border-[#EADFD3] bg-white text-xs"
+                              required
+                            />
 
-                          <button
-                            type="submit"
-                            suppressHydrationWarning
-                            className="w-full py-2 rounded-xl bg-[#5C3A21] text-white font-bold text-xs hover:bg-[#462B18]"
-                          >
-                            Kirim Ulasan Saya
-                          </button>
-                        </>
-                      )}
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      suppressHydrationWarning
-                      onClick={() => {
-                        setShowReviewForm(true);
-                        setReviewName(matchedOrder.customerName);
-                      }}
-                      className="w-full py-2.5 rounded-2xl border border-[#E6D8C7] bg-[#FAF6F0] text-xs font-bold text-[#5C3A21] hover:bg-[#F2E8DC] flex items-center justify-center gap-1.5 transition"
-                    >
-                      <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                      <span>Pesanan Telah Selesai! Klik untuk Beri Rating &amp; Ulasan</span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+                            <button
+                              type="submit"
+                              className="w-full py-1.5 rounded-lg bg-[#5C3A21] text-white font-semibold text-xs"
+                            >
+                              Kirim Ulasan
+                            </button>
+                          </>
+                        )}
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReviewOrderId(order.id);
+                          setReviewName(order.customer_name);
+                        }}
+                        className="w-full py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] text-xs font-semibold text-[#5C3A21] hover:bg-[#F2E8DC] flex items-center justify-center gap-1.5 transition"
+                      >
+                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                        <span>Beri Ulasan</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))
           )}
         </div>
       </div>
