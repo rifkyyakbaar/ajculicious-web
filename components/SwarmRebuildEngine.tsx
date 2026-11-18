@@ -125,7 +125,9 @@ export default function SwarmRebuildEngine({
   );
   const agentBusyRef = useRef<boolean[]>(SWARM_AGENTS.map(() => false));
   const nextAgentAssignRef = useRef<number>(0);
+  const hasStartedInitialRef = useRef<boolean>(false);
   const hasCompletedInitialRef = useRef<boolean>(false);
+  const pendingTimersRef = useRef<number[]>([]);
   const onInitialCompleteRef = useRef(onInitialBuildComplete);
 
   useEffect(() => {
@@ -311,8 +313,17 @@ export default function SwarmRebuildEngine({
   // Masukkan daftar elemen ke antrean kursor secara merata
   const enqueueElementsForSwarm = useCallback(
     (elements: HTMLElement[], isInitialViewportBatch = false) => {
+      if (isInitialViewportBatch) {
+        hasStartedInitialRef.current = true;
+      }
+
       if (elements.length === 0) {
-        if (isInitialViewportBatch && !hasCompletedInitialRef.current) {
+        if (
+          hasStartedInitialRef.current &&
+          !hasCompletedInitialRef.current &&
+          !agentBusyRef.current.some(Boolean) &&
+          !agentTaskQueuesRef.current.some((q) => q.length > 0)
+        ) {
           hasCompletedInitialRef.current = true;
           onInitialCompleteRef.current?.();
         }
@@ -330,25 +341,32 @@ export default function SwarmRebuildEngine({
       });
 
       const checkAllAgentsDone = () => {
-        if (!isInitialViewportBatch || hasCompletedInitialRef.current) return;
+        if (!hasStartedInitialRef.current || hasCompletedInitialRef.current) {
+          return;
+        }
         const anyBusy = agentBusyRef.current.some(Boolean);
         const anyQueued = agentTaskQueuesRef.current.some(
           (q) => q.length > 0
         );
         if (!anyBusy && !anyQueued) {
           hasCompletedInitialRef.current = true;
-          // Setelah animasi awal selesai, baru tampilkan popup panduan!
-          setTimeout(() => {
+          // Setelah seluruh animasi awal selesai, baru tampilkan popup panduan!
+          const doneTimer = window.setTimeout(() => {
             onInitialCompleteRef.current?.();
           }, 350);
+          pendingTimersRef.current.push(doneTimer);
         }
       };
 
       SWARM_AGENTS.forEach((_, idx) => {
-        if (agentTaskQueuesRef.current[idx].length > 0) {
-          setTimeout(() => {
+        if (
+          agentTaskQueuesRef.current[idx].length > 0 &&
+          !agentBusyRef.current[idx]
+        ) {
+          const t = window.setTimeout(() => {
             processAgentQueue(idx, checkAllAgentsDone);
           }, idx * 140);
+          pendingTimersRef.current.push(t);
         }
       });
     },
@@ -365,7 +383,10 @@ export default function SwarmRebuildEngine({
       document.querySelectorAll<HTMLElement>(TARGET_SELECTORS)
     ).filter((el) => {
       const r = el.getBoundingClientRect();
-      return r.width >= 15 && r.height >= 15;
+      return (
+        el.id === 'tour-hero-counter' ||
+        (r.width >= 15 && r.height >= 15)
+      );
     });
 
     // Sembunyikan semua elemen target secara sinkron sebelum paint
@@ -467,6 +488,8 @@ export default function SwarmRebuildEngine({
 
     return () => {
       cancelAnimationFrame(startRaf);
+      pendingTimersRef.current.forEach((t) => clearTimeout(t));
+      pendingTimersRef.current = [];
       observer.disconnect();
       mutationObserver.disconnect();
     };

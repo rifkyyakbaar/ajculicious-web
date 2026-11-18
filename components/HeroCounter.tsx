@@ -52,8 +52,12 @@ export default function HeroCounter({
           <img
             src="/images/storefront-counter.jpg"
             alt="Konter Interaktif AJCUlicious"
+            width={1584}
+            height={672}
+            style={{ aspectRatio: '1584 / 672' }}
             className="w-full h-auto block rounded-3xl"
             loading="eager"
+            fetchPriority="high"
           />
 
           {/* Area Interaktif Konter */}
