@@ -37,7 +37,7 @@ const TOUR_STEPS: StepDetail[] = [
     badge: 'Langkah 1 / 4',
     title: 'Info Jadwal Pre-Order',
     description:
-      'Cek status Pre-Order yang sedang aktif dan batas waktu pemesanan di bagian atas ini.',
+      'Cek status Pre-Order yang sedang aktif, batas waktu pemesanan, serta jadwal & jam pengambilan di bagian atas ini.',
     icon: <Calendar className="w-4 h-4 text-amber-300" />,
     popupPositionClass: 'top-32 left-1/2 -translate-x-1/2',
   },
@@ -67,7 +67,7 @@ const TOUR_STEPS: StepDetail[] = [
     badge: 'Langkah 4 / 4',
     title: 'Checkout & Cek Pesanan',
     description:
-      'Klik "Keranjang" untuk isi nama & pilih pembayaran (COD / QRIS), atau klik "Cek Pesanan" untuk melacak status invoice.',
+      'Klik "Keranjang" untuk isi nama, nomor WA, & pilih pembayaran (COD / QRIS / Transfer Bank) langsung via web, atau klik "Cek Pesanan" untuk melacak status invoice.',
     icon: <ShoppingBag className="w-4 h-4 text-amber-300" />,
     popupPositionClass: 'top-20 right-4 sm:right-8',
   },
@@ -110,8 +110,12 @@ export default function OnboardingTour({
           </button>
 
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#5C3A21] text-white flex items-center justify-center font-black text-sm">
-              AJC
+            <div className="w-12 h-12 rounded-full bg-white border border-[#EADFD3] overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
+              <img
+                src="/images/logo-ajculicious.jpg"
+                alt="Logo AJCUlicious"
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
               <h3 className="font-extrabold text-base text-[#3B2618]">

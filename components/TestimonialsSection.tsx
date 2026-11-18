@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Star,
   Plus,
@@ -285,7 +285,7 @@ export default function TestimonialsSection({
                   >
                     {products.map((prod) => (
                       <option key={prod.id} value={prod.name}>
-                        {prod.emoji} {prod.name}
+                        {prod.name}
                       </option>
                     ))}
                   </select>

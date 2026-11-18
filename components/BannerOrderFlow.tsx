@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { Clock } from 'lucide-react';
 import { BatchPOConfig } from '../types/ajculicious';
 
 interface BannerOrderFlowProps {
@@ -32,11 +31,24 @@ export default function BannerOrderFlow({
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5 text-[#7D5E46]">
-        <Clock className="w-3.5 h-3.5 text-[#5C3A21]" />
-        <span>
-          Batas Order: <strong className="text-[#3B2618]">{batchConfig.orderDeadline}</strong>
-        </span>
+      <div className="flex flex-wrap items-center gap-2.5 sm:gap-3.5 text-[#7D5E46]">
+        <div>
+          <span>
+            Batas Order:{' '}
+            <strong className="text-[#3B2618]">{batchConfig.orderDeadline}</strong>
+          </span>
+        </div>
+
+        <span className="hidden sm:inline text-[#D8C2A8]">|</span>
+
+        <div className="px-2.5 py-1 rounded-lg bg-[#FAF6F0] border border-[#EADFD3]">
+          <span>
+            Jadwal &amp; Jam Pengambilan:{' '}
+            <strong className="text-[#3B2618]">
+              {batchConfig.readyPickupDate} ({batchConfig.readyPickupTime})
+            </strong>
+          </span>
+        </div>
       </div>
     </div>
   );

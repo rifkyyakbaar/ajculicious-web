@@ -28,6 +28,13 @@ import {
   Wallet,
   BarChart3,
   PieChart,
+  Info,
+  Eye,
+  Calculator,
+  Phone,
+  User,
+  Image as ImageIcon,
+  Scale,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -49,6 +56,7 @@ import {
   getAdminOrdersAndSummary,
   updateOrderStatus,
   updateOrderPaymentStatus,
+  sendReadyPickupWhatsAppViaFonnte,
   upsertProduct,
   updateProductStockAndAvailability,
   updateBatchSettingsInDb,
@@ -80,9 +88,65 @@ export default function AdminDashboardView({
   batchConfig,
   onUpdateBatchConfig,
 }: AdminDashboardViewProps) {
-  const [activeTab, setActiveTab] = useState<'orders' | 'catalog' | 'report'>(
-    'orders'
+  const [activeTab, setActiveTab] = useState<
+    'orders' | 'catalog' | 'report' | 'calculator'
+  >('orders');
+
+  // Modal Detail Pelanggan & Lihat Bukti TF/QRIS
+  const [selectedOrderInfo, setSelectedOrderInfo] =
+    useState<OrderWithItems | null>(null);
+  const [proofModalTab, setProofModalTab] = useState<'info' | 'proof'>('info');
+
+  // Kalkulator Perhitungan Bahan Produksi States
+  const [calcSelectedProduct, setCalcSelectedProduct] = useState<string>(
+    'Brownies (150g)'
   );
+  const [calcMode, setCalcMode] = useState<'stock_to_pcs' | 'pcs_to_stock'>(
+    'stock_to_pcs'
+  );
+  const [calcTargetPcs, setCalcTargetPcs] = useState<number>(100);
+  const [calcIngredients, setCalcIngredients] = useState<
+    Array<{
+      id: string;
+      name: string;
+      unit: string;
+      stockAvailable: number;
+      needPerPcs: number;
+    }>
+  >([
+    {
+      id: 'ing-1',
+      name: 'Tepung Terigu Protein Sedang',
+      unit: 'gr',
+      stockAvailable: 100,
+      needPerPcs: 1,
+    },
+    {
+      id: 'ing-2',
+      name: 'Belgian Dark Chocolate',
+      unit: 'gr',
+      stockAvailable: 200,
+      needPerPcs: 2,
+    },
+    {
+      id: 'ing-3',
+      name: 'Butter / Mentega Anchor',
+      unit: 'gr',
+      stockAvailable: 150,
+      needPerPcs: 1.5,
+    },
+    {
+      id: 'ing-4',
+      name: 'Gula Halus / Brown Sugar',
+      unit: 'gr',
+      stockAvailable: 100,
+      needPerPcs: 1,
+    },
+  ]);
+  const [newIngName, setNewIngName] = useState('');
+  const [newIngUnit, setNewIngUnit] = useState('gr');
+  const [newIngStock, setNewIngStock] = useState<number>(100);
+  const [newIngNeed, setNewIngNeed] = useState<number>(1);
 
   // Live Supabase Data States
   const [dbOrders, setDbOrders] = useState<OrderWithItems[]>([]);
@@ -101,6 +165,7 @@ export default function AdminDashboardView({
   });
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [sendingWaId, setSendingWaId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Filter & Search States
@@ -134,6 +199,12 @@ export default function AdminDashboardView({
   );
   const [batchDeadlineInput, setBatchDeadlineInput] = useState(
     batchConfig?.orderDeadline || 'Kamis, 19 Nov 2026, 21:00 WITA'
+  );
+  const [batchPickupDateInput, setBatchPickupDateInput] = useState(
+    batchConfig?.readyPickupDate || 'Jumat, 20 Nov 2026'
+  );
+  const [batchPickupTimeInput, setBatchPickupTimeInput] = useState(
+    batchConfig?.readyPickupTime || '13:00 - 17:00 WITA'
   );
   const [batchIsOpenInput, setBatchIsOpenInput] = useState(
     batchConfig?.isOpen ?? true
@@ -215,29 +286,22 @@ export default function AdminDashboardView({
     setProcessingId(null);
   };
 
-  // Susun kalimat WhatsApp notifikasi "Pesanan Sudah Siap Diambil"
-  const buildReadyPickupWaText = (order: OrderWithItems) => {
-    const itemList = (order.order_items ?? [])
-      .map((i) => `- ${i.quantity}x ${i.product_name_snapshot}`)
-      .join('\n');
-    const isPaid = order.payment_status === 'SUDAH_BAYAR';
-    const paymentInfo = isPaid
-      ? 'SUDAH BAYAR (LUNAS)'
-      : `BELUM BAYAR (${order.payment_method} - ${formatRupiah(
-          order.total_price
-        )})`;
+  // Handler Kirim WA Pesanan Siap Langsung via Fonnte API
+  const handleSendDirectFonnteWa = async (order: OrderWithItems) => {
+    setSendingWaId(order.id);
+    const res = await sendReadyPickupWhatsAppViaFonnte(order.id);
+    setSendingWaId(null);
 
-    return [
-      `Halo Kak *${order.customer_name}*! 👋🍪`,
-      `Kabar gembira dari *AJCUlicious*! Pesanan Pre-Order Anda sudah *SIAP DIAMBIL* sekarang:`,
-      ``,
-      `🧾 *Kode Invoice:* #${order.invoice_code}`,
-      `💳 *Status Pembayaran:* ${paymentInfo}`,
-      `📦 *Rincian Menu:*`,
-      itemList,
-      ``,
-      `Silakan tunjukkan kode invoice *#${order.invoice_code}* saat pengambilan pesanan ya Kak. Terima kasih! 🙏`,
-    ].join('\n');
+    if (res.success && res.data) {
+      showToast(
+        `Pesan WA Pesanan Siap berhasil dikirim langsung ke ${res.data.phone} via Fonnte`
+      );
+    } else {
+      showToast(
+        res.error ||
+          'Gagal mengirim WA via Fonnte. Pastikan perangkat terhubung di dashboard Fonnte.'
+      );
+    }
   };
 
   // Handler Toggle Ketersediaan PO Produk
@@ -335,8 +399,8 @@ export default function AdminDashboardView({
       batchName: batchNameInput,
       isOpen: batchIsOpenInput,
       orderDeadline: batchDeadlineInput,
-      readyPickupDate: batchConfig?.readyPickupDate || 'Jumat, 20 Nov 2026',
-      readyPickupTime: batchConfig?.readyPickupTime || '13:00 - 17:00 WITA',
+      readyPickupDate: batchPickupDateInput,
+      readyPickupTime: batchPickupTimeInput,
     });
     setIsSavingBatch(false);
     if (res.success) {
@@ -346,11 +410,79 @@ export default function AdminDashboardView({
           batchName: batchNameInput,
           isOpen: batchIsOpenInput,
           orderDeadline: batchDeadlineInput,
+          readyPickupDate: batchPickupDateInput,
+          readyPickupTime: batchPickupTimeInput,
         });
       }
-      showToast('Jadwal Pre-Order berhasil diperbarui di database!');
+      showToast('Jadwal Pre-Order & Jam Pengambilan berhasil diperbarui!');
     } else {
       showToast(res.error || 'Gagal menyimpan jadwal Pre-Order.');
+    }
+  };
+
+  const formatCustomerWaDestination = (phone?: string) => {
+    if (!phone || phone === '-') return '';
+    const digits = phone.replace(/[^\d]/g, '');
+    if (digits.startsWith('08')) return '62' + digits.slice(1);
+    if (digits.startsWith('628')) return digits;
+    if (digits.startsWith('8')) return '62' + digits;
+    return digits;
+  };
+
+  const handleLoadRecipePreset = (
+    productName: string,
+    mode: 'simulasi_100' | 'standar_dapur'
+  ) => {
+    setCalcSelectedProduct(productName);
+    const lower = productName.toLowerCase();
+
+    if (mode === 'simulasi_100') {
+      // Sesuai contoh PDF: 100g tepung + coklat sekian gram -> otomatis bisa jadi 100 brownies/produk
+      if (lower.includes('dimsum')) {
+        setCalcIngredients([
+          { id: '1', name: 'Daging Ayam & Udang Giling', unit: 'gr', stockAvailable: 100, needPerPcs: 1 },
+          { id: '2', name: 'Tepung Tapioka', unit: 'gr', stockAvailable: 50, needPerPcs: 0.5 },
+          { id: '3', name: 'Kulit Dimsum', unit: 'lbr', stockAvailable: 100, needPerPcs: 1 },
+        ]);
+      } else {
+        setCalcIngredients([
+          { id: '1', name: 'Tepung Terigu', unit: 'gr', stockAvailable: 100, needPerPcs: 1 },
+          { id: '2', name: 'Cokelat / Dark Chocolate', unit: 'gr', stockAvailable: 200, needPerPcs: 2 },
+          { id: '3', name: 'Butter / Mentega', unit: 'gr', stockAvailable: 100, needPerPcs: 1 },
+          { id: '4', name: 'Gula Halus / Brown Sugar', unit: 'gr', stockAvailable: 100, needPerPcs: 1 },
+        ]);
+      }
+      return;
+    }
+
+    // Mode Standar Dapur Realistis
+    if (lower.includes('dubai')) {
+      setCalcIngredients([
+        { id: '1', name: 'Tepung Terigu Protein Sedang', unit: 'gr', stockAvailable: 1000, needPerPcs: 25 },
+        { id: '2', name: 'Belgian Dark Chocolate', unit: 'gr', stockAvailable: 800, needPerPcs: 20 },
+        { id: '3', name: 'Krim Pistachio & Kunafa', unit: 'gr', stockAvailable: 600, needPerPcs: 15 },
+        { id: '4', name: 'Butter Anchor', unit: 'gr', stockAvailable: 600, needPerPcs: 15 },
+      ]);
+    } else if (lower.includes('dimsum')) {
+      setCalcIngredients([
+        { id: '1', name: 'Fillet Ayam & Udang Segar', unit: 'gr', stockAvailable: 1500, needPerPcs: 90 },
+        { id: '2', name: 'Tepung Tapioka Premium', unit: 'gr', stockAvailable: 500, needPerPcs: 20 },
+        { id: '3', name: 'Saus Chili Oil / Mentai', unit: 'gr', stockAvailable: 600, needPerPcs: 25 },
+      ]);
+    } else if (lower.includes('brownies')) {
+      setCalcIngredients([
+        { id: '1', name: 'Tepung Terigu', unit: 'gr', stockAvailable: 1000, needPerPcs: 20 },
+        { id: '2', name: 'Dark Chocolate Compound', unit: 'gr', stockAvailable: 1500, needPerPcs: 30 },
+        { id: '3', name: 'Butter / Margarin', unit: 'gr', stockAvailable: 1000, needPerPcs: 20 },
+        { id: '4', name: 'Gula Halus', unit: 'gr', stockAvailable: 1000, needPerPcs: 20 },
+      ]);
+    } else {
+      setCalcIngredients([
+        { id: '1', name: 'Tepung Terigu', unit: 'gr', stockAvailable: 1000, needPerPcs: 25 },
+        { id: '2', name: 'Chocochip / White Choco', unit: 'gr', stockAvailable: 800, needPerPcs: 20 },
+        { id: '3', name: 'Butter Anchor', unit: 'gr', stockAvailable: 600, needPerPcs: 15 },
+        { id: '4', name: 'Brown Sugar', unit: 'gr', stockAvailable: 600, needPerPcs: 15 },
+      ]);
     }
   };
 
@@ -358,7 +490,9 @@ export default function AdminDashboardView({
     const rows = dbOrders.map((o) => ({
       'Kode Invoice': o.invoice_code,
       'Nama Pemesan': o.customer_name,
+      'No. WhatsApp': o.customer_phone || '-',
       'Metode Pembayaran': o.payment_method,
+      'Info Bank': o.bank_info || '-',
       'Status Bayar':
         o.payment_status === 'SUDAH_BAYAR' ? 'SUDAH BAYAR' : 'BELUM BAYAR',
       'Total Harga (Rp)': o.total_price,
@@ -389,7 +523,8 @@ export default function AdminDashboardView({
     const matchesQuery =
       !q ||
       o.invoice_code.toLowerCase().includes(q) ||
-      o.customer_name.toLowerCase().includes(q);
+      o.customer_name.toLowerCase().includes(q) ||
+      (o.customer_phone || '').toLowerCase().includes(q);
     return matchesStatus && matchesPayment && matchesQuery;
   });
 
@@ -433,29 +568,25 @@ export default function AdminDashboardView({
     switch (status) {
       case 'PENDING':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-            <Clock className="w-3 h-3" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
             PENDING
           </span>
         );
       case 'SIAP_DIAMBIL':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-            <Sparkles className="w-3 h-3" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
             SIAP DIAMBIL
           </span>
         );
       case 'SELESAI':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-600 text-white">
-            <CheckCircle2 className="w-3 h-3" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-600 text-white">
             SELESAI
           </span>
         );
       case 'BATAL':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
-            <Ban className="w-3 h-3" />
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
             BATAL
           </span>
         );
@@ -475,8 +606,12 @@ export default function AdminDashboardView({
       <header className="sticky top-0 z-40 bg-white border-b border-[#EADFD3] px-4 sm:px-8 py-3.5 shadow-2xs">
         <div className="w-full max-w-[1600px] mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#5C3A21] text-white flex items-center justify-center font-black text-sm">
-              AJC
+            <div className="w-10 h-10 rounded-full bg-white border border-[#EADFD3] overflow-hidden flex items-center justify-center shrink-0">
+              <img
+                src="/images/logo-ajculicious.jpg"
+                alt="Logo AJCUlicious"
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -578,8 +713,9 @@ export default function AdminDashboardView({
               <span>Metode Pembayaran</span>
               <CreditCard className="w-4 h-4 text-[#5C3A21]" />
             </div>
-            <p className="font-extrabold text-xl text-[#3B2618]">
-              {summary.cod_orders_count} COD / {summary.qris_orders_count} QRIS
+            <p className="font-extrabold text-lg text-[#3B2618]">
+              {summary.cod_orders_count} COD / {summary.qris_orders_count} QRIS /{' '}
+              {summary.transfer_orders_count || 0} TF
             </p>
             <p className="text-[11px] text-[#8C6D53]">
               Total {summary.total_orders} transaksi masuk
@@ -753,40 +889,49 @@ export default function AdminDashboardView({
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeTab === 'orders'
                 ? 'bg-[#5C3A21] text-white'
                 : 'bg-white text-[#5C3A21] border border-[#EADFD3] hover:bg-[#F2E8DC]'
             }`}
           >
-            <Package className="w-3.5 h-3.5" />
-            <span>Pesanan &amp; Verifikasi Bayar ({dbOrders.length})</span>
+            Pesanan &amp; Verifikasi Bayar ({dbOrders.length})
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('catalog')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeTab === 'catalog'
                 ? 'bg-[#5C3A21] text-white'
                 : 'bg-white text-[#5C3A21] border border-[#EADFD3] hover:bg-[#F2E8DC]'
             }`}
           >
-            <Store className="w-3.5 h-3.5" />
-            <span>Katalog &amp; Bahan Produk ({products.length})</span>
+            Katalog &amp; Bahan Produk ({products.length})
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('report')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeTab === 'report'
                 ? 'bg-[#5C3A21] text-white'
                 : 'bg-white text-[#5C3A21] border border-[#EADFD3] hover:bg-[#F2E8DC]'
             }`}
           >
-            <ChefHat className="w-3.5 h-3.5" />
-            <span>Rekap Produksi &amp; Jadwal PO</span>
+            Rekap Produksi &amp; Jadwal PO
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('calculator')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+              activeTab === 'calculator'
+                ? 'bg-[#5C3A21] text-white'
+                : 'bg-white text-[#5C3A21] border border-[#EADFD3] hover:bg-[#F2E8DC]'
+            }`}
+          >
+            Perhitungan Bahan Produksi
           </button>
         </div>
 
@@ -880,6 +1025,7 @@ export default function AdminDashboardView({
               <div className="space-y-3">
                 {filteredOrders.map((order) => {
                   const isBusy = processingId === order.id;
+                  const isSendingWa = sendingWaId === order.id;
                   const isPaid = order.payment_status === 'SUDAH_BAYAR';
 
                   return (
@@ -887,7 +1033,8 @@ export default function AdminDashboardView({
                       key={order.id}
                       className="bg-white border border-[#EADFD3] rounded-2xl p-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4"
                     >
-                      <div className="space-y-2 flex-1">
+                      {/* Sisi Kiri: Data Pesanan & Item */}
+                      <div className="space-y-2 flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-[#FAF6F0] text-[#5C3A21] border border-[#EADFD3]">
                             #{order.invoice_code}
@@ -895,8 +1042,16 @@ export default function AdminDashboardView({
                           <span className="font-bold text-sm text-[#3B2618]">
                             {order.customer_name}
                           </span>
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-stone-100 text-[#5C3A21] font-semibold">
-                            {order.payment_method}
+                          {order.customer_phone &&
+                            order.customer_phone !== '-' && (
+                              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-semibold">
+                                {order.customer_phone}
+                              </span>
+                            )}
+                          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-stone-100 text-[#5C3A21] font-semibold">
+                            {order.payment_method === 'TRANSFER'
+                              ? `TF (${order.bank_info || 'Bank'})`
+                              : order.payment_method}
                           </span>
                           {getStatusBadge(order.status)}
                         </div>
@@ -913,7 +1068,7 @@ export default function AdminDashboardView({
                           ))}
                         </div>
 
-                        <div className="flex items-center gap-3 text-xs text-[#8C6D53]">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-[#8C6D53]">
                           <span>
                             {new Date(order.created_at).toLocaleString(
                               'id-ID',
@@ -933,118 +1088,95 @@ export default function AdminDashboardView({
                         </div>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-[#F4ECE1]">
-                        {/* SAKLAR 2 PILIHAN JELAS: BELUM BAYAR vs SUDAH BAYAR */}
-                        <div className="inline-flex items-center rounded-xl p-1 bg-[#FAF6F0] border border-[#EADFD3]">
+                      {/* Sisi Kanan: Tersusun 2 Baris Rapi (Tidak Menumpuk Memanjang ke Samping) */}
+                      <div className="flex flex-col sm:items-end gap-2 w-full lg:w-auto border-t lg:border-t-0 pt-3 lg:pt-0 border-[#F4ECE1] shrink-0">
+                        {/* Baris 1: Status Bayar + Tombol Info/Bukti */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(order.payment_proof_url ||
+                            order.payment_method === 'TRANSFER' ||
+                            order.payment_method === 'QRIS') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedOrderInfo(order);
+                                setProofModalTab('proof');
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition border ${
+                                order.payment_proof_url
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                  : 'bg-stone-50 hover:bg-stone-100 text-stone-600 border-stone-200'
+                              }`}
+                            >
+                              Lihat Bukti TF
+                            </button>
+                          )}
+
                           <button
                             type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              handlePaymentStatusChange(
-                                order.id,
-                                order.invoice_code,
-                                'BELUM_BAYAR'
-                              )
-                            }
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                              !isPaid
-                                ? 'bg-rose-600 text-white shadow-2xs'
-                                : 'text-[#8C6D53] hover:text-[#3B2618]'
-                            }`}
+                            onClick={() => {
+                              setSelectedOrderInfo(order);
+                              setProofModalTab('info');
+                            }}
+                            className="px-3 py-1.5 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] text-[11px] font-bold transition"
                           >
-                            Belum Bayar
+                            Data Pelanggan
                           </button>
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              handlePaymentStatusChange(
-                                order.id,
-                                order.invoice_code,
-                                'SUDAH_BAYAR'
-                              )
-                            }
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
-                              isPaid
-                                ? 'bg-emerald-600 text-white shadow-2xs'
-                                : 'text-[#8C6D53] hover:text-[#3B2618]'
-                            }`}
-                          >
-                            <Check className="w-3 h-3" />
-                            <span>Sudah Bayar</span>
-                          </button>
+
+                          <div className="inline-flex items-center rounded-xl p-0.5 bg-[#FAF6F0] border border-[#EADFD3]">
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                handlePaymentStatusChange(
+                                  order.id,
+                                  order.invoice_code,
+                                  'BELUM_BAYAR'
+                                )
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                                !isPaid
+                                  ? 'bg-rose-600 text-white'
+                                  : 'text-[#8C6D53] hover:text-[#3B2618]'
+                              }`}
+                            >
+                              Belum Bayar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                handlePaymentStatusChange(
+                                  order.id,
+                                  order.invoice_code,
+                                  'SUDAH_BAYAR'
+                                )
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                                isPaid
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'text-[#8C6D53] hover:text-[#3B2618]'
+                              }`}
+                            >
+                              Sudah Bayar
+                            </button>
+                          </div>
                         </div>
 
-                        {/* Tombol Direct ke WhatsApp (Kalimat Pesanan Sudah Siap Diambil) & Salin */}
-                        <a
-                          href={`https://wa.me/?text=${encodeURIComponent(
-                            buildReadyPickupWaText(order)
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition flex items-center gap-1.5"
-                          title="Buka WhatsApp dengan kalimat Pesanan Sudah Siap Diambil"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5" />
-                          <span>WA Pesanan Siap</span>
-                        </a>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(
-                              buildReadyPickupWaText(order)
-                            );
-                            showToast(
-                              `Kalimat WA Pesanan Siap #${order.invoice_code} disalin!`
-                            );
-                          }}
-                          className="p-1.5 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] transition"
-                          title="Salin kalimat WA Pesanan Siap Diambil"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Tombol Status Pesanan */}
-                        {order.status === 'PENDING' && (
+                        {/* Baris 2: Kirim WA Langsung (Fonnte) + Aksi Status Pesanan */}
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              handleStatusChange(
-                                order.id,
-                                order.invoice_code,
-                                'SIAP_DIAMBIL'
-                              )
-                            }
-                            className="px-3 py-1.5 rounded-xl bg-[#5C3A21] hover:bg-[#462B18] text-white text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
+                            disabled={isSendingWa}
+                            onClick={() => handleSendDirectFonnteWa(order)}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition disabled:opacity-60"
+                            title="Kirim pesan WA Pesanan Siap secara otomatis lewat Fonnte"
                           >
-                            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                            <span>Siap Diambil</span>
+                            {isSendingWa
+                              ? 'Mengirim WA...'
+                              : 'Kirim WA Pesanan Siap'}
                           </button>
-                        )}
 
-                        {(order.status === 'PENDING' ||
-                          order.status === 'SIAP_DIAMBIL') && (
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              handleStatusChange(
-                                order.id,
-                                order.invoice_code,
-                                'SELESAI'
-                              )
-                            }
-                            className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-900 text-white text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Selesai</span>
-                          </button>
-                        )}
-
-                        {order.status !== 'BATAL' &&
-                          order.status !== 'SELESAI' && (
+                          {order.status === 'PENDING' && (
                             <button
                               type="button"
                               disabled={isBusy}
@@ -1052,14 +1184,51 @@ export default function AdminDashboardView({
                                 handleStatusChange(
                                   order.id,
                                   order.invoice_code,
-                                  'BATAL'
+                                  'SIAP_DIAMBIL'
                                 )
                               }
-                              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold transition disabled:opacity-50"
+                              className="px-3 py-1.5 rounded-xl bg-[#5C3A21] hover:bg-[#462B18] text-white text-[11px] font-bold transition disabled:opacity-50"
                             >
-                              Batalkan
+                              Siap Diambil
                             </button>
                           )}
+
+                          {(order.status === 'PENDING' ||
+                            order.status === 'SIAP_DIAMBIL') && (
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                handleStatusChange(
+                                  order.id,
+                                  order.invoice_code,
+                                  'SELESAI'
+                                )
+                              }
+                              className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-900 text-white text-[11px] font-bold transition disabled:opacity-50"
+                            >
+                              Selesai
+                            </button>
+                          )}
+
+                          {order.status !== 'BATAL' &&
+                            order.status !== 'SELESAI' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  handleStatusChange(
+                                    order.id,
+                                    order.invoice_code,
+                                    'BATAL'
+                                  )
+                                }
+                                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold transition disabled:opacity-50"
+                              >
+                                Batalkan
+                              </button>
+                            )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1102,9 +1271,18 @@ export default function AdminDashboardView({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
-                        <div className="w-11 h-11 rounded-xl bg-[#FAF6F0] border border-[#EADFD3] flex items-center justify-center text-2xl shrink-0">
-                          {prod.emoji}
-                        </div>
+                        {prod.imageUrl &&
+                        prod.imageUrl !== '/images/storefront-counter.jpg' ? (
+                          <img
+                            src={prod.imageUrl}
+                            alt={prod.name}
+                            className="w-14 h-16 rounded-xl object-cover border border-[#EADFD3] shrink-0"
+                          />
+                        ) : (
+                          <div className="w-11 h-11 rounded-xl bg-[#FAF6F0] border border-[#EADFD3] flex items-center justify-center text-2xl shrink-0">
+                            {prod.emoji}
+                          </div>
+                        )}
                         <div>
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FAF6F0] text-[#7D5E46] font-medium border border-[#EADFD3]">
                             {prod.categoryLabel}
@@ -1235,6 +1413,36 @@ export default function AdminDashboardView({
                   />
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Tanggal Pengambilan
+                    </label>
+                    <input
+                      type="text"
+                      value={batchPickupDateInput}
+                      onChange={(e) => setBatchPickupDateInput(e.target.value)}
+                      placeholder="Contoh: Jumat, 20 Nov 2026"
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Jam Pengambilan
+                    </label>
+                    <input
+                      type="text"
+                      value={batchPickupTimeInput}
+                      onChange={(e) => setBatchPickupTimeInput(e.target.value)}
+                      placeholder="Contoh: 13:00 - 17:00 WITA"
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                      required
+                    />
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between pt-1">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -1260,7 +1468,724 @@ export default function AdminDashboardView({
             </div>
           </div>
         )}
+
+        {/* ================= TAB 4: PERHITUNGAN BAHAN PRODUKSI OTOMATIS ================= */}
+        {activeTab === 'calculator' &&
+          (() => {
+            const validIngredients = calcIngredients.filter(
+              (ing) => ing.needPerPcs > 0
+            );
+            const capacities = validIngredients.map((ing) => ({
+              ...ing,
+              maxPcs: Math.floor(ing.stockAvailable / ing.needPerPcs),
+            }));
+            const maxProduciblePcs =
+              capacities.length > 0
+                ? Math.min(...capacities.map((c) => c.maxPcs))
+                : 0;
+            const limitingIng = capacities.find(
+              (c) => c.maxPcs === maxProduciblePcs
+            );
+            const matchedProduct = products.find(
+              (p) =>
+                p.name.toLowerCase() === calcSelectedProduct.toLowerCase() ||
+                calcSelectedProduct
+                  .toLowerCase()
+                  .includes(p.name.toLowerCase())
+            );
+            const unitPrice = matchedProduct?.price || 25000;
+            const estimatedRevenue = maxProduciblePcs * unitPrice;
+
+            return (
+              <div className="space-y-4">
+                {/* Header & Pilihan Mode Kalkulator */}
+                <div className="bg-white border border-[#EADFD3] rounded-2xl p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Scale className="w-4 h-4 text-[#5C3A21]" />
+                      <h3 className="font-extrabold text-sm sm:text-base text-[#3B2618]">
+                        Kalkulator Perhitungan Bahan &amp; Estimasi Produksi
+                      </h3>
+                    </div>
+                    <p className="text-xs text-[#8C6D53]">
+                      Input stok bahan baku (misal: 100g tepung, cokelat sekian
+                      gram) untuk otomatis menentukan jumlah produk yang bisa
+                      dibuat.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCalcMode('stock_to_pcs')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                        calcMode === 'stock_to_pcs'
+                          ? 'bg-[#5C3A21] text-white'
+                          : 'bg-[#FAF6F0] text-[#5C3A21] border border-[#EADFD3]'
+                      }`}
+                    >
+                      Stok Bahan &rarr; Jadi Berapa Pcs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCalcMode('pcs_to_stock')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                        calcMode === 'pcs_to_stock'
+                          ? 'bg-[#5C3A21] text-white'
+                          : 'bg-[#FAF6F0] text-[#5C3A21] border border-[#EADFD3]'
+                      }`}
+                    >
+                      Target Pcs &rarr; Kebutuhan Bahan
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                  {/* Kolom Kiri (7 Kolom): Input Bahan & Takaran */}
+                  <div className="lg:col-span-7 bg-white border border-[#EADFD3] rounded-2xl p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#F4ECE1] pb-3">
+                      <div>
+                        <label className="block text-xs font-bold text-[#3B2618] mb-1">
+                          Pilih Menu Produk Target:
+                        </label>
+                        <select
+                          value={calcSelectedProduct}
+                          onChange={(e) =>
+                            setCalcSelectedProduct(e.target.value)
+                          }
+                          className="px-3.5 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] text-xs font-bold text-[#3B2618] focus:outline-none focus:ring-2 focus:ring-[#5C3A21]"
+                        >
+                          <option value="Brownies (150g)">
+                            Brownies (150g) — Rp22.000
+                          </option>
+                          <option value="Brownies (200g)">
+                            Brownies (200g) — Rp28.000
+                          </option>
+                          <option value="Brownies Box">
+                            Brownies Box — Rp60.000
+                          </option>
+                          <option value="Dubai Chewy Cookie">
+                            Dubai Chewy Cookie — Rp25.000
+                          </option>
+                          <option value="Cookies Original">
+                            Cookies Original — Rp8.000
+                          </option>
+                          <option value="Cookies Double Choco">
+                            Cookies Double Choco — Rp11.000
+                          </option>
+                          <option value="Cookies Matcha">
+                            Cookies Matcha — Rp11.000
+                          </option>
+                          <option value="Cookies Red Velvet">
+                            Cookies Red Velvet — Rp13.000
+                          </option>
+                          <option value="Cookies Lotus Biscoff">
+                            Cookies Lotus Biscoff — Rp15.000
+                          </option>
+                          <option value="Dessert Box">
+                            Dessert Box — Rp10.000
+                          </option>
+                          <option value="Dimsum Original">
+                            Dimsum Original — Rp21.000
+                          </option>
+                          <option value="Dimsum Mentai">
+                            Dimsum Mentai — Rp26.000
+                          </option>
+                        </select>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleLoadRecipePreset(
+                              calcSelectedProduct,
+                              'simulasi_100'
+                            )
+                          }
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold transition"
+                        >
+                          Contoh Simulasi (100g &rarr; 100 Pcs)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleLoadRecipePreset(
+                              calcSelectedProduct,
+                              'standar_dapur'
+                            )
+                          }
+                          className="px-2.5 py-1.5 rounded-lg bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] border border-[#EADFD3] text-[11px] font-bold transition"
+                        >
+                          Resep Dapur Standar
+                        </button>
+                      </div>
+                    </div>
+
+                    {calcMode === 'pcs_to_stock' && (
+                      <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
+                        <span className="text-xs font-bold text-amber-950">
+                          Target Jumlah Produksi ({calcSelectedProduct}):
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            value={calcTargetPcs}
+                            onChange={(e) =>
+                              setCalcTargetPcs(
+                                Math.max(1, Number(e.target.value) || 1)
+                              )
+                            }
+                            className="w-24 px-3 py-1.5 rounded-xl border border-amber-300 bg-white font-extrabold text-xs text-center text-[#3B2618]"
+                          />
+                          <span className="text-xs font-bold text-amber-900">
+                            pcs
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Daftar Input Bahan Baku */}
+                    <div className="space-y-2.5">
+                      <div className="grid grid-cols-12 gap-2 text-[11px] font-bold text-[#8C6D53] px-1">
+                        <div className="col-span-5">Nama Bahan Baku</div>
+                        <div className="col-span-3 text-center">
+                          Stok Tersedia
+                        </div>
+                        <div className="col-span-3 text-center">
+                          Takaran / 1 Pcs
+                        </div>
+                        <div className="col-span-1"></div>
+                      </div>
+
+                      {calcIngredients.map((ing) => (
+                        <div
+                          key={ing.id}
+                          className="grid grid-cols-12 gap-2 items-center bg-[#FAF6F0] p-2.5 rounded-xl border border-[#EADFD3] text-xs"
+                        >
+                          <div className="col-span-5 font-bold text-[#3B2618] truncate">
+                            {ing.name}
+                          </div>
+
+                          <div className="col-span-3 flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={ing.stockAvailable}
+                              onChange={(e) => {
+                                const val = Math.max(
+                                  0,
+                                  Number(e.target.value) || 0
+                                );
+                                setCalcIngredients((prev) =>
+                                  prev.map((item) =>
+                                    item.id === ing.id
+                                      ? { ...item, stockAvailable: val }
+                                      : item
+                                  )
+                                );
+                              }}
+                              className="w-full px-2 py-1.5 rounded-lg border border-[#EADFD3] bg-white font-bold text-center text-[#3B2618]"
+                            />
+                            <span className="text-[10px] text-[#8C6D53] font-semibold">
+                              {ing.unit}
+                            </span>
+                          </div>
+
+                          <div className="col-span-3 flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={0.1}
+                              step="any"
+                              value={ing.needPerPcs}
+                              onChange={(e) => {
+                                const val = Math.max(
+                                  0.01,
+                                  Number(e.target.value) || 0.1
+                                );
+                                setCalcIngredients((prev) =>
+                                  prev.map((item) =>
+                                    item.id === ing.id
+                                      ? { ...item, needPerPcs: val }
+                                      : item
+                                  )
+                                );
+                              }}
+                              className="w-full px-2 py-1.5 rounded-lg border border-[#EADFD3] bg-white font-semibold text-center text-[#5C3A21]"
+                            />
+                            <span className="text-[10px] text-[#8C6D53]">
+                              {ing.unit}
+                            </span>
+                          </div>
+
+                          <div className="col-span-1 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCalcIngredients((prev) =>
+                                  prev.filter((item) => item.id !== ing.id)
+                                )
+                              }
+                              className="p-1 text-stone-400 hover:text-rose-600"
+                              title="Hapus bahan"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Tambah Bahan Baru ke Kalkulator */}
+                    <div className="pt-2 border-t border-[#F4ECE1]">
+                      <p className="text-[11px] font-bold text-[#7D5E46] mb-2">
+                        + Tambah Bahan Lain ke Perhitungan:
+                      </p>
+                      <div className="grid grid-cols-12 gap-2 items-center text-xs">
+                        <input
+                          type="text"
+                          value={newIngName}
+                          onChange={(e) => setNewIngName(e.target.value)}
+                          placeholder="Nama bahan (misal: Kacang Almond)"
+                          className="col-span-5 px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          value={newIngStock}
+                          onChange={(e) =>
+                            setNewIngStock(Number(e.target.value) || 0)
+                          }
+                          placeholder="Stok (gr)"
+                          className="col-span-2 px-2 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50 text-center"
+                        />
+                        <input
+                          type="number"
+                          min={0.1}
+                          step="any"
+                          value={newIngNeed}
+                          onChange={(e) =>
+                            setNewIngNeed(Number(e.target.value) || 1)
+                          }
+                          placeholder="Per pcs"
+                          className="col-span-2 px-2 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50 text-center"
+                        />
+                        <select
+                          value={newIngUnit}
+                          onChange={(e) => setNewIngUnit(e.target.value)}
+                          className="col-span-1 px-1 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50 text-center"
+                        >
+                          <option value="gr">gr</option>
+                          <option value="ml">ml</option>
+                          <option value="btr">btr</option>
+                          <option value="lbr">lbr</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!newIngName.trim()) return;
+                            setCalcIngredients((prev) => [
+                              ...prev,
+                              {
+                                id: `ing-${Date.now()}`,
+                                name: newIngName.trim(),
+                                unit: newIngUnit,
+                                stockAvailable: newIngStock,
+                                needPerPcs: Math.max(0.01, newIngNeed),
+                              },
+                            ]);
+                            setNewIngName('');
+                          }}
+                          className="col-span-2 py-2 px-3 rounded-xl bg-[#5C3A21] text-white font-bold hover:bg-[#462B18] transition"
+                        >
+                          Tambah
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Kolom Kanan (5 Kolom): Hasil Perhitungan Otomatis */}
+                  <div className="lg:col-span-5 bg-white border border-[#EADFD3] rounded-2xl p-5 flex flex-col justify-between space-y-4">
+                    <div className="space-y-4">
+                      <div className="p-5 rounded-2xl bg-gradient-to-br from-[#5C3A21] to-[#3B2618] text-white text-center space-y-1.5 shadow-md">
+                        <span className="text-[11px] uppercase tracking-wider font-semibold text-amber-200">
+                          {calcMode === 'stock_to_pcs'
+                            ? 'Hasil Estimasi Kapasitas Produksi Otomatis'
+                            : 'Target Produksi yang Direncanakan'}
+                        </span>
+                        <p className="text-3xl sm:text-4xl font-black tracking-tight text-white">
+                          {calcMode === 'stock_to_pcs'
+                            ? maxProduciblePcs
+                            : calcTargetPcs}{' '}
+                          <span className="text-lg font-bold text-amber-300">
+                            {calcSelectedProduct.toLowerCase().includes('brownies')
+                              ? 'Brownies'
+                              : calcSelectedProduct.toLowerCase().includes('cookies')
+                              ? 'Cookies'
+                              : calcSelectedProduct.toLowerCase().includes('dimsum')
+                              ? 'Porsi Dimsum'
+                              : 'Pcs'}
+                          </span>
+                        </p>
+                        <p className="text-xs text-stone-200 font-medium">
+                          Menu: <strong>{calcSelectedProduct}</strong>
+                        </p>
+                        <div className="pt-2 mt-2 border-t border-white/15 flex items-center justify-between text-xs">
+                          <span className="text-amber-200">
+                            Potensi Nilai Penjualan:
+                          </span>
+                          <span className="font-extrabold text-sm text-emerald-300">
+                            {formatRupiah(
+                              (calcMode === 'stock_to_pcs'
+                                ? maxProduciblePcs
+                                : calcTargetPcs) * unitPrice
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {calcMode === 'stock_to_pcs' && limitingIng && (
+                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
+                          <strong>Penentu Kapasitas (Pembatas):</strong> Stok{' '}
+                          <strong>{limitingIng.name}</strong> ({limitingIng.stockAvailable}
+                          {limitingIng.unit}) menghasilkan maksimal{' '}
+                          <strong>{limitingIng.maxPcs} pcs</strong>.
+                        </div>
+                      )}
+
+                      {/* Tabel Rincian Pemakaian & Sisa per Bahan */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-bold text-[#3B2618]">
+                          {calcMode === 'stock_to_pcs'
+                            ? 'Rincian Kapasitas & Sisa Bahan Baku:'
+                            : `Total Kebutuhan Bahan untuk ${calcTargetPcs} Pcs:`}
+                        </h4>
+
+                        <div className="divide-y divide-[#F4ECE1] border border-[#EADFD3] rounded-xl bg-[#FAF6F0] px-3.5 text-xs">
+                          {capacities.map((c) => {
+                            const usedAmount =
+                              (calcMode === 'stock_to_pcs'
+                                ? maxProduciblePcs
+                                : calcTargetPcs) * c.needPerPcs;
+                            const remainingAmount =
+                              c.stockAvailable - usedAmount;
+                            const isShort = remainingAmount < 0;
+
+                            return (
+                              <div
+                                key={c.id}
+                                className="py-2.5 flex items-center justify-between gap-2"
+                              >
+                                <div>
+                                  <p className="font-bold text-[#3B2618]">
+                                    {c.name}
+                                  </p>
+                                  <p className="text-[11px] text-[#8C6D53]">
+                                    {calcMode === 'stock_to_pcs'
+                                      ? `Cukup hingga ${c.maxPcs} pcs (Pakai: ${Math.round(
+                                          usedAmount * 10
+                                        ) / 10}${c.unit})`
+                                      : `Butuh: ${Math.round(usedAmount * 10) / 10}${
+                                          c.unit
+                                        } (Stok: ${c.stockAvailable}${c.unit})`}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 ${
+                                    isShort
+                                      ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                                      : remainingAmount === 0
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  }`}
+                                >
+                                  {isShort
+                                    ? `Kurang ${Math.abs(
+                                        Math.round(remainingAmount * 10) / 10
+                                      )}${c.unit}`
+                                    : `Sisa ${
+                                        Math.round(remainingAmount * 10) / 10
+                                      }${c.unit}`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-[#FAF6F0] border border-[#EADFD3] text-[11px] text-[#7D5E46]">
+                      Anda dapat menyesuaikan angka <strong>Stok Tersedia</strong>{' '}
+                      maupun <strong>Takaran / 1 Pcs</strong> di sebelah kiri
+                      secara bebas sesuai takaran resep dapur AJCUlicious.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
       </main>
+
+      {/* ================= MODAL INFO DATA PELANGGAN & LIHAT BUKTI TF / QRIS ================= */}
+      {selectedOrderInfo && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-[#EADFD3] pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-[#FAF6F0] text-[#5C3A21] border border-[#EADFD3]">
+                    #{selectedOrderInfo.invoice_code}
+                  </span>
+                  {getStatusBadge(selectedOrderInfo.status)}
+                </div>
+                <h3 className="font-extrabold text-base text-[#3B2618] mt-1">
+                  Data Pelanggan &amp; Bukti Pembayaran
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedOrderInfo(null)}
+                className="p-1.5 rounded-full hover:bg-[#FAF6F0]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Sub-Tab di dalam Modal: Data Pelanggan vs Bukti TF */}
+            <div className="grid grid-cols-2 gap-2 bg-[#FAF6F0] p-1 rounded-xl border border-[#EADFD3]">
+              <button
+                type="button"
+                onClick={() => setProofModalTab('info')}
+                className={`py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                  proofModalTab === 'info'
+                    ? 'bg-[#5C3A21] text-white'
+                    : 'text-[#5C3A21] hover:bg-white/60'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Detail Data Pelanggan</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProofModalTab('proof')}
+                className={`py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                  proofModalTab === 'proof'
+                    ? 'bg-[#5C3A21] text-white'
+                    : 'text-[#5C3A21] hover:bg-white/60'
+                }`}
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span>
+                  Lihat Bukti TF / QRIS{' '}
+                  {selectedOrderInfo.payment_proof_url ? '✓' : ''}
+                </span>
+              </button>
+            </div>
+
+            {proofModalTab === 'info' ? (
+              <div className="space-y-3 text-xs">
+                <div className="p-4 rounded-2xl bg-[#FAF6F0] border border-[#EADFD3] space-y-2.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#8C6D53]">Nama Pemesan:</span>
+                    <span className="font-extrabold text-sm text-[#3B2618]">
+                      {selectedOrderInfo.customer_name}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#8C6D53]">Nomor WhatsApp:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-sm text-emerald-800">
+                        {selectedOrderInfo.customer_phone || '-'}
+                      </span>
+                      {selectedOrderInfo.customer_phone &&
+                        selectedOrderInfo.customer_phone !== '-' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(
+                                selectedOrderInfo.customer_phone || ''
+                              );
+                              showToast('Nomor WA pelanggan disalin!');
+                            }}
+                            className="p-1 rounded bg-white border border-[#EADFD3] text-[#5C3A21]"
+                            title="Salin Nomor WA"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#8C6D53]">Metode Pembayaran:</span>
+                    <span className="font-bold text-[#3B2618]">
+                      {selectedOrderInfo.payment_method === 'TRANSFER'
+                        ? `Transfer Bank (${
+                            selectedOrderInfo.bank_info || 'Rekening AJC'
+                          })`
+                        : selectedOrderInfo.payment_method}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#8C6D53]">Status Bayar:</span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                        selectedOrderInfo.payment_status === 'SUDAH_BAYAR'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {selectedOrderInfo.payment_status === 'SUDAH_BAYAR'
+                        ? 'SUDAH BAYAR (LUNAS)'
+                        : 'BELUM BAYAR'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#8C6D53]">Waktu Pemesanan:</span>
+                    <span className="font-semibold text-[#3B2618]">
+                      {new Date(selectedOrderInfo.created_at).toLocaleString(
+                        'id-ID'
+                      )}
+                    </span>
+                  </div>
+
+                  {selectedOrderInfo.customer_notes && (
+                    <div className="pt-2 border-t border-[#EADFD3]">
+                      <span className="text-[#8C6D53] block mb-0.5">
+                        Fakultas / Catatan Pelanggan:
+                      </span>
+                      <p className="font-semibold text-[#3B2618]">
+                        {selectedOrderInfo.customer_notes}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Daftar Item Pesanan */}
+                <div className="p-4 rounded-2xl border border-[#EADFD3] bg-white space-y-2">
+                  <p className="font-bold text-[#3B2618]">Rincian Menu:</p>
+                  {(selectedOrderInfo.order_items ?? []).map((it) => (
+                    <div
+                      key={it.id}
+                      className="flex justify-between items-center py-1 border-b border-[#F4ECE1] last:border-0"
+                    >
+                      <span>
+                        <strong>{it.quantity}x</strong> {it.product_name_snapshot}
+                      </span>
+                      <span className="font-semibold">
+                        {formatRupiah(it.subtotal)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-2 flex justify-between items-center text-sm font-extrabold text-[#3B2618]">
+                    <span>Total Tagihan</span>
+                    <span className="text-[#5C3A21]">
+                      {formatRupiah(selectedOrderInfo.total_price)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tombol Kirim WA Langsung via Fonnte */}
+                {selectedOrderInfo.customer_phone &&
+                  selectedOrderInfo.customer_phone !== '-' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={sendingWaId === selectedOrderInfo.id}
+                        onClick={() =>
+                          handleSendDirectFonnteWa(selectedOrderInfo)
+                        }
+                        className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-center transition disabled:opacity-60"
+                      >
+                        {sendingWaId === selectedOrderInfo.id
+                          ? 'Mengirim WA...'
+                          : 'Kirim WA Pesanan Siap (Fonnte)'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setProofModalTab('proof')}
+                        className="py-2.5 px-3 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] font-bold text-center"
+                      >
+                        Lihat Bukti Pembayaran
+                      </button>
+                    </div>
+                  )}
+              </div>
+            ) : (
+              /* TAB BUKTI TF / QRIS */
+              <div className="space-y-3 text-xs">
+                {selectedOrderInfo.payment_proof_url ? (
+                  <div className="space-y-3">
+                    <div className="p-2 rounded-2xl border border-[#EADFD3] bg-[#FAF6F0] flex items-center justify-center">
+                      <img
+                        src={selectedOrderInfo.payment_proof_url}
+                        alt={`Bukti Bayar #${selectedOrderInfo.invoice_code}`}
+                        className="max-h-80 w-auto object-contain rounded-xl"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <a
+                        href={selectedOrderInfo.payment_proof_url}
+                        download={`Bukti_${selectedOrderInfo.invoice_code}.jpg`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3.5 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] text-[#5C3A21] font-bold hover:bg-[#F2E8DC]"
+                      >
+                        Buka Ukuran Penuh
+                      </a>
+
+                      {selectedOrderInfo.payment_status !== 'SUDAH_BAYAR' && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await handlePaymentStatusChange(
+                              selectedOrderInfo.id,
+                              selectedOrderInfo.invoice_code,
+                              'SUDAH_BAYAR'
+                            );
+                            setSelectedOrderInfo((prev) =>
+                              prev
+                                ? { ...prev, payment_status: 'SUDAH_BAYAR' }
+                                : null
+                            );
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Verifikasi &amp; Tandai Sudah Bayar</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-10 px-4 text-center rounded-2xl bg-[#FAF6F0] border border-[#EADFD3] space-y-2">
+                    <AlertCircle className="w-8 h-8 text-[#8C6D53] mx-auto" />
+                    <p className="font-bold text-[#3B2618]">
+                      {selectedOrderInfo.payment_method === 'COD'
+                        ? 'Pesanan ini menggunakan metode COD (Bayar Saat Ambil)'
+                        : 'Pelanggan belum mengunggah foto bukti transfer/QRIS'}
+                    </p>
+                    <p className="text-[11px] text-[#8C6D53]">
+                      Metode: <strong>{selectedOrderInfo.payment_method}</strong>{' '}
+                      &bull; Total:{' '}
+                      <strong>{formatRupiah(selectedOrderInfo.total_price)}</strong>
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal Tambah / Edit Produk & Komposisi Bahan */}
       {showProductModal && (

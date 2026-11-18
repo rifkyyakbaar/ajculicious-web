@@ -2,6 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '../lib/supabase/server';
+import { sendFonnteWhatsAppMessage } from '../lib/fonnte';
+import { formatRupiah } from '../utils/formatters';
 import {
   ActionResponse,
   AdminUserProfile,
@@ -102,6 +104,61 @@ export async function updateOrderStatus(
       };
     }
 
+    // Jika status diubah menjadi SIAP_DIAMBIL, otomatis kirim WA ke pelanggan via Fonnte
+    if (newStatus === 'SIAP_DIAMBIL') {
+      const { data: orderRow } = await supabase
+        .from('orders')
+        .select(
+          `
+          invoice_code,
+          customer_name,
+          customer_phone,
+          payment_method,
+          payment_status,
+          total_price,
+          order_items (
+            quantity,
+            product_name_snapshot
+          )
+        `
+        )
+        .eq('id', orderId)
+        .single();
+
+      if (
+        orderRow &&
+        orderRow.customer_phone &&
+        orderRow.customer_phone !== '-'
+      ) {
+        const itemList = ((orderRow.order_items ?? []) as Array<{
+          quantity: number;
+          product_name_snapshot: string;
+        }>)
+          .map((i) => `- ${i.quantity}x ${i.product_name_snapshot}`)
+          .join('\n');
+        const isPaid = orderRow.payment_status === 'SUDAH_BAYAR';
+        const paymentInfo = isPaid
+          ? 'SUDAH BAYAR (LUNAS)'
+          : `BELUM BAYAR (${orderRow.payment_method} - ${formatRupiah(
+              orderRow.total_price
+            )})`;
+
+        const readyWaMsg = [
+          `Halo ${orderRow.customer_name},`,
+          `Pesanan Pre-Order AJCUlicious Anda saat ini sudah SIAP DIAMBIL:`,
+          ``,
+          `Kode Invoice: #${orderRow.invoice_code}`,
+          `Status Pembayaran: ${paymentInfo}`,
+          `Rincian Pesanan:`,
+          itemList,
+          ``,
+          `Silakan tunjukkan kode invoice #${orderRow.invoice_code} saat pengambilan pesanan di konter. Terima kasih.`,
+        ].join('\n');
+
+        await sendFonnteWhatsAppMessage(orderRow.customer_phone, readyWaMsg);
+      }
+    }
+
     revalidatePath('/');
     revalidatePath('/cek-pesanan');
 
@@ -116,6 +173,109 @@ export async function updateOrderStatus(
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Gagal mengubah status.',
+    };
+  }
+}
+
+/**
+ * Server Action Admin: sendReadyPickupWhatsAppViaFonnte
+ * ----------------------------------------------------------------------------
+ * Mengirimkan chat WhatsApp "Pesanan Siap Diambil" secara langsung ke nomor
+ * pelanggan melalui Fonnte API tanpa membuka tab wa.me.
+ */
+export async function sendReadyPickupWhatsAppViaFonnte(
+  orderId: string
+): Promise<ActionResponse<{ phone: string; detail?: string }>> {
+  try {
+    if (!orderId) {
+      return { success: false, error: 'ID pesanan tidak valid.' };
+    }
+
+    const supabase = createSupabaseServerClient();
+    const { data: orderRow, error } = await supabase
+      .from('orders')
+      .select(
+        `
+        invoice_code,
+        customer_name,
+        customer_phone,
+        payment_method,
+        payment_status,
+        total_price,
+        order_items (
+          quantity,
+          product_name_snapshot
+        )
+      `
+      )
+      .eq('id', orderId)
+      .single();
+
+    if (error || !orderRow) {
+      return { success: false, error: 'Data pesanan tidak ditemukan.' };
+    }
+
+    if (!orderRow.customer_phone || orderRow.customer_phone === '-') {
+      return {
+        success: false,
+        error: 'Pesanan ini tidak memiliki nomor WhatsApp pelanggan.',
+      };
+    }
+
+    const itemList = ((orderRow.order_items ?? []) as Array<{
+      quantity: number;
+      product_name_snapshot: string;
+    }>)
+      .map((i) => `- ${i.quantity}x ${i.product_name_snapshot}`)
+      .join('\n');
+
+    const isPaid = orderRow.payment_status === 'SUDAH_BAYAR';
+    const paymentInfo = isPaid
+      ? 'SUDAH BAYAR (LUNAS)'
+      : `BELUM BAYAR (${orderRow.payment_method} - ${formatRupiah(
+          orderRow.total_price
+        )})`;
+
+    const readyWaMsg = [
+      `Halo ${orderRow.customer_name},`,
+      `Pesanan Pre-Order AJCUlicious Anda saat ini sudah SIAP DIAMBIL:`,
+      ``,
+      `Kode Invoice: #${orderRow.invoice_code}`,
+      `Status Pembayaran: ${paymentInfo}`,
+      `Rincian Pesanan:`,
+      itemList,
+      ``,
+      `Silakan tunjukkan kode invoice #${orderRow.invoice_code} saat pengambilan pesanan di konter. Terima kasih.`,
+    ].join('\n');
+
+    const res = await sendFonnteWhatsAppMessage(
+      orderRow.customer_phone,
+      readyWaMsg
+    );
+
+    if (!res.sent) {
+      return {
+        success: false,
+        error:
+          res.detail ||
+          'Gagal mengirim pesan via Fonnte. Pastikan perangkat WA di dashboard Fonnte berstatus Connected.',
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        phone: orderRow.customer_phone,
+        detail: res.detail,
+      },
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Gagal mengirim pesan WhatsApp otomatis.',
     };
   }
 }
@@ -377,8 +537,12 @@ export async function getAdminOrdersAndSummary(): Promise<
         id,
         invoice_code,
         customer_name,
+        customer_phone,
         payment_method,
         payment_status,
+        payment_proof_url,
+        bank_info,
+        customer_notes,
         total_price,
         status,
         created_at,
@@ -412,6 +576,9 @@ export async function getAdminOrdersAndSummary(): Promise<
     const qrisOrdersCount = activeOrders.filter(
       (o) => o.payment_method === 'QRIS'
     ).length;
+    const transferOrdersCount = activeOrders.filter(
+      (o) => o.payment_method === 'TRANSFER'
+    ).length;
 
     const productStatsMap = new Map<string, TopSellingProductStat>();
     for (const order of activeOrders) {
@@ -437,6 +604,7 @@ export async function getAdminOrdersAndSummary(): Promise<
       total_orders: orders.length,
       cod_orders_count: codOrdersCount,
       qris_orders_count: qrisOrdersCount,
+      transfer_orders_count: transferOrdersCount,
       paid_orders_count: activeOrders.filter(
         (o) => o.payment_status === 'SUDAH_BAYAR'
       ).length,

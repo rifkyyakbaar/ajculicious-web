@@ -1,4 +1,4 @@
-export type DbPaymentMethod = 'COD' | 'QRIS';
+export type DbPaymentMethod = 'COD' | 'QRIS' | 'TRANSFER';
 
 export type DbPaymentStatus = 'BELUM_BAYAR' | 'SUDAH_BAYAR';
 
@@ -54,8 +54,12 @@ export interface OrderRow {
   id: string;
   invoice_code: string;
   customer_name: string;
+  customer_phone?: string;
   payment_method: DbPaymentMethod;
   payment_status?: DbPaymentStatus;
+  payment_proof_url?: string | null;
+  bank_info?: string | null;
+  customer_notes?: string | null;
   total_price: number;
   status: DbOrderStatus;
   created_at: string;
@@ -78,11 +82,16 @@ export interface OrderWithItems extends OrderRow {
 export interface CheckoutCartItemInput {
   product_id: string;
   quantity: number;
+  custom_name?: string;
 }
 
 export interface CreateOrderInput {
   customer_name: string;
+  customer_phone?: string;
   payment_method?: DbPaymentMethod; // Default: 'COD'
+  payment_proof_url?: string | null;
+  bank_info?: string | null;
+  customer_notes?: string | null;
   items: CheckoutCartItemInput[];
 }
 
@@ -98,12 +107,18 @@ export interface CreateOrderSuccessData {
   order_id: string;
   invoice_code: string;
   customer_name: string;
+  customer_phone: string;
   payment_method: DbPaymentMethod;
+  payment_proof_url?: string | null;
+  bank_info?: string | null;
+  customer_notes?: string | null;
   total_price: number;
   status: DbOrderStatus;
   items: CreateOrderItemResult[];
   whatsapp_url: string;
   whatsapp_message: string;
+  wa_notification_sent?: boolean;
+  wa_verified_by_gateway?: boolean;
 }
 
 export interface ActionResponse<T> {
@@ -124,6 +139,7 @@ export interface SalesSummaryReport {
   total_orders: number;
   cod_orders_count: number;
   qris_orders_count: number;
+  transfer_orders_count?: number;
   paid_orders_count?: number;
   unpaid_orders_count?: number;
   pending_orders_count: number;

@@ -219,7 +219,7 @@ export default function HeroCounter({
                         <div className="pt-1.5 border-t border-[#F2E8DC] flex items-center justify-between gap-2">
                           <div className="min-w-0">
                             <p className="font-bold text-[11px] text-[#3B2618] truncate">
-                              {favoriteProduct.emoji} {favoriteProduct.name}
+                              {favoriteProduct.name}
                             </p>
                             <span className="text-[10px] font-semibold text-[#7D5E46]">
                               {formatRupiah(favoriteProduct.price)}
@@ -233,19 +233,11 @@ export default function HeroCounter({
                               e.stopPropagation();
                               onAddToCart(favoriteProduct);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#5C3A21] text-white text-[10px] font-bold hover:bg-[#462B18] active:scale-95 transition-all shrink-0"
+                            className="px-2.5 py-1 rounded-lg bg-[#5C3A21] text-white text-[10px] font-bold hover:bg-[#462B18] active:scale-95 transition-all shrink-0"
                           >
-                            {addedToastProduct === favoriteProduct.id ? (
-                              <>
-                                <Check className="w-3 h-3 text-emerald-300" />
-                                <span>Ditambah</span>
-                              </>
-                            ) : (
-                              <>
-                                <Plus className="w-3 h-3" />
-                                <span>Tambah</span>
-                              </>
-                            )}
+                            {addedToastProduct === favoriteProduct.id
+                              ? 'Ditambah'
+                              : '+ Tambah'}
                           </button>
                         </div>
                       )}

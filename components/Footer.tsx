@@ -16,8 +16,12 @@ export default function Footer({ onOpenAdminLogin }: FooterProps) {
     <footer className="mt-12 bg-white border-t border-[#EADFD3] py-6 text-[#462B18]">
       <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-[#5C3A21] text-white flex items-center justify-center font-black text-xs">
-            AJC
+          <div className="w-9 h-9 rounded-full bg-white border border-[#EADFD3] overflow-hidden flex items-center justify-center shrink-0">
+            <img
+              src="/images/logo-ajculicious.jpg"
+              alt="Logo AJCUlicious"
+              className="w-full h-full object-cover"
+            />
           </div>
           <span className="font-bold text-sm text-[#3B2618]">
             AJCUlicious

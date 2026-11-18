@@ -6,10 +6,12 @@
 
 -- 1. ENUM TYPES
 DO $$ BEGIN
-  CREATE TYPE public.payment_method_enum AS ENUM ('COD', 'QRIS');
+  CREATE TYPE public.payment_method_enum AS ENUM ('COD', 'QRIS', 'TRANSFER');
 EXCEPTION
   WHEN duplicate_object THEN null;
 END $$;
+
+ALTER TYPE public.payment_method_enum ADD VALUE IF NOT EXISTS 'TRANSFER';
 
 DO $$ BEGIN
   CREATE TYPE public.order_status_enum AS ENUM ('PENDING', 'SIAP_DIAMBIL', 'SELESAI', 'BATAL');
@@ -42,12 +44,16 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 2.3. orders (Tanpa kolom alamat/ongkir/nomor WA sesuai spesifikasi Hybrid Checkout)
+-- 2.3. orders (Mendukung Nomor WA, Bukti TF/QRIS, dan Pemesanan Langsung via Web)
 CREATE TABLE IF NOT EXISTS public.orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   invoice_code VARCHAR(40) NOT NULL UNIQUE,
   customer_name VARCHAR(120) NOT NULL CHECK (length(trim(customer_name)) > 0),
+  customer_phone VARCHAR(30) NOT NULL DEFAULT '-',
   payment_method public.payment_method_enum NOT NULL DEFAULT 'COD',
+  payment_proof_url TEXT,
+  bank_info VARCHAR(100),
+  customer_notes TEXT,
   total_price INTEGER NOT NULL CHECK (total_price >= 0),
   status public.order_status_enum NOT NULL DEFAULT 'PENDING',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -69,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_products_category_id ON public.products(category_
 CREATE INDEX IF NOT EXISTS idx_products_is_available ON public.products(is_available);
 CREATE INDEX IF NOT EXISTS idx_orders_invoice_code ON public.orders(invoice_code);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_name_lower ON public.orders(lower(customer_name));
+CREATE INDEX IF NOT EXISTS idx_orders_customer_phone ON public.orders(customer_phone);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON public.orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items(order_id);
@@ -134,11 +141,15 @@ CREATE POLICY "order_items_insert_checkout" ON public.order_items
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.categories, public.products, public.orders, public.order_items TO anon, authenticated;
 
--- 5. ATOMIC HYBRID CHECKOUT RPC FUNCTION
+-- 5. ATOMIC WEB CHECKOUT RPC FUNCTION
 CREATE OR REPLACE FUNCTION public.create_hybrid_order(
   p_customer_name TEXT,
   p_payment_method public.payment_method_enum,
-  p_items JSONB
+  p_items JSONB,
+  p_customer_phone TEXT,
+  p_payment_proof_url TEXT,
+  p_bank_info TEXT,
+  p_customer_notes TEXT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -147,6 +158,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_clean_name TEXT;
+  v_clean_phone TEXT;
   v_item JSONB;
   v_product_id UUID;
   v_qty INTEGER;
@@ -162,6 +174,11 @@ BEGIN
   v_clean_name := trim(coalesce(p_customer_name, ''));
   IF length(v_clean_name) = 0 THEN
     RAISE EXCEPTION 'Nama pelanggan wajib diisi.';
+  END IF;
+
+  v_clean_phone := trim(coalesce(p_customer_phone, '-'));
+  IF length(v_clean_phone) = 0 THEN
+    v_clean_phone := '-';
   END IF;
 
   IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' OR jsonb_array_length(p_items) = 0 THEN
@@ -180,8 +197,28 @@ BEGIN
     v_seq := v_seq + 1;
   END LOOP;
 
-  INSERT INTO public.orders (invoice_code, customer_name, payment_method, total_price, status)
-  VALUES (v_invoice_code, v_clean_name, COALESCE(p_payment_method, 'COD'), 0, 'PENDING')
+  INSERT INTO public.orders (
+    invoice_code,
+    customer_name,
+    customer_phone,
+    payment_method,
+    payment_proof_url,
+    bank_info,
+    customer_notes,
+    total_price,
+    status
+  )
+  VALUES (
+    v_invoice_code,
+    v_clean_name,
+    v_clean_phone,
+    COALESCE(p_payment_method, 'COD'),
+    p_payment_proof_url,
+    p_bank_info,
+    p_customer_notes,
+    0,
+    'PENDING'
+  )
   RETURNING id INTO v_order_id;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)

@@ -273,40 +273,53 @@ export default function OrderTrackerModal({
                       <div className="text-xs text-amber-950">
                         <p className="font-bold">Menunggu Pembayaran Transfer / QRIS</p>
                         <p className="text-[11px] mt-0.5 text-amber-800">
-                          Silakan transfer sebesar <strong>{formatRupiah(order.totalPrice)}</strong> ke rekening resmi berikut lalu upload bukti transfer:
+                          Silakan bayar sebesar <strong>{formatRupiah(order.totalPrice)}</strong> melalui {order.paymentMethod === 'QRIS' ? 'QRIS resmi AJCUlicious' : 'rekening resmi berikut'} lalu upload bukti pembayaran:
                         </p>
                       </div>
                     </div>
 
-                    {/* Bank Mandiri & BluBCA Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {OFFICIAL_INFO.bankAccounts.map((b) => (
-                        <div
-                          key={b.bankName}
-                          className="p-2.5 rounded-xl bg-white border border-amber-200 flex items-center justify-between text-xs"
-                        >
-                          <div>
-                            <p className="font-bold text-[#3B2618]">{b.bankName}</p>
-                            <p className="font-mono font-black text-xs text-[#5C3A21]">
-                              {b.accountNumber}
-                            </p>
-                            <p className="text-[10px] text-[#7D5E46]">a.n. {b.accountHolder}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleCopy(b.accountNumberRaw, b.bankName)}
-                            className="px-2.5 py-1 rounded-lg bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] font-bold text-[10px] border border-[#E6D8C7] flex items-center gap-1"
-                          >
-                            {copiedBank === b.bankName ? (
-                              <Check className="w-3 h-3 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                            <span>{copiedBank === b.bankName ? 'Disalin' : 'Salin'}</span>
-                          </button>
+                    {order.paymentMethod === 'QRIS' ? (
+                      <div className="max-w-[240px] mx-auto rounded-2xl border-2 border-[#5C3A21] bg-white overflow-hidden">
+                        <img
+                          src={OFFICIAL_INFO.qris.imageUrl}
+                          alt={`QRIS ${OFFICIAL_INFO.qris.merchantName}`}
+                          className="w-full h-auto block"
+                        />
+                        <div className="px-3 py-1.5 bg-[#FAF6F0] border-t border-[#EADFD3] text-center text-[10px] font-bold text-[#5C3A21]">
+                          NMID: {OFFICIAL_INFO.qris.nmid} • {formatRupiah(order.totalPrice)}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ) : (
+                      /* Bank Mandiri & BluBCA Cards */
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {OFFICIAL_INFO.bankAccounts.map((b) => (
+                          <div
+                            key={b.bankName}
+                            className="p-2.5 rounded-xl bg-white border border-amber-200 flex items-center justify-between text-xs"
+                          >
+                            <div>
+                              <p className="font-bold text-[#3B2618]">{b.bankName}</p>
+                              <p className="font-mono font-black text-xs text-[#5C3A21]">
+                                {b.accountNumber}
+                              </p>
+                              <p className="text-[10px] text-[#7D5E46]">a.n. {b.accountHolder}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(b.accountNumberRaw, b.bankName)}
+                              className="px-2.5 py-1 rounded-lg bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] font-bold text-[10px] border border-[#E6D8C7] flex items-center gap-1"
+                            >
+                              {copiedBank === b.bankName ? (
+                                <Check className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                              <span>{copiedBank === b.bankName ? 'Disalin' : 'Salin'}</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Form Upload Bukti Transfer */}
                     {selectedOrderIdForProof === order.id ? (

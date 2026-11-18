@@ -59,8 +59,12 @@ export default function AdminLoginModal({
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#5C3A21] text-white flex items-center justify-center font-bold">
-              <Lock className="w-4 h-4 text-[#FAF6F0]" />
+            <div className="w-11 h-11 rounded-full bg-white border border-[#EADFD3] overflow-hidden flex items-center justify-center shrink-0">
+              <img
+                src="/images/logo-ajculicious.jpg"
+                alt="Logo AJCUlicious"
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
               <h3 className="font-extrabold text-base text-[#3B2618]">

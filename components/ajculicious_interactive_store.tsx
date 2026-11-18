@@ -12,6 +12,7 @@ import AdminLoginModal from './AdminLoginModal';
 import AdminDashboardView from './AdminDashboardView';
 import Footer from './Footer';
 import OnboardingTour, { TourStep } from './OnboardingTour';
+import SwarmRebuildEngine from './SwarmRebuildEngine';
 
 import {
   Product,
@@ -66,9 +67,7 @@ export default function AjculiciousInteractiveStore({
   // UI Interactive States
   const [activeTeamMember, setActiveTeamMember] = useState<TeamMember>(TEAM_MEMBERS[2]);
   const [activeCategory, setActiveCategory] = useState<CategorySlug>(initialCategory);
-  const [tourStep, setTourStep] = useState<TourStep>(
-    openTrackerInitially ? null : 'welcome'
-  );
+  const [tourStep, setTourStep] = useState<TourStep>(null);
 
   // Modals
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -76,6 +75,14 @@ export default function AjculiciousInteractiveStore({
   const [buyerTrackerInvoiceCode, setBuyerTrackerInvoiceCode] = useState('');
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
   const [addedToastProductId, setAddedToastProductId] = useState<string | null>(null);
+  const [isSwarmRebuilding, setIsSwarmRebuilding] = useState(false);
+  const [swarmTriggerCount, setSwarmTriggerCount] = useState(0);
+
+  const handleTriggerSwarmRebuild = () => {
+    setIsSwarmRebuilding(true);
+    setSwarmTriggerCount((prev) => prev + 1);
+    setTimeout(() => setIsSwarmRebuilding(false), 1400);
+  };
 
   // Hydrate from localStorage on client-side mount
   useEffect(() => {
@@ -173,6 +180,7 @@ export default function AjculiciousInteractiveStore({
         const updated = [...prev];
         updated[existingIndex] = {
           ...updated[existingIndex],
+          product,
           quantity: currentQty + 1,
         };
         return updated;
@@ -314,9 +322,19 @@ export default function AjculiciousInteractiveStore({
   // RENDER BUYER STOREFRONT
   return (
     <div
+      data-swarm-preload={!openTrackerInitially ? 'true' : undefined}
       className="min-h-screen bg-[#FAF6F0] text-[#3B2618] flex flex-col font-sans selection:bg-[#F2E8DC] selection:text-[#5C3A21]"
       suppressHydrationWarning
     >
+      <SwarmRebuildEngine
+        triggerKey={swarmTriggerCount}
+        onInitialBuildComplete={() => {
+          if (!openTrackerInitially) {
+            setTourStep('welcome');
+          }
+        }}
+      />
+
       {/* 3.A. Sticky Top Navbar */}
       <Navbar
         onOpenTour={() => setTourStep('welcome')}
@@ -328,6 +346,7 @@ export default function AjculiciousInteractiveStore({
         cartTotalPrice={totalCartPrice}
         onOpenCart={() => setIsCartOpen(true)}
         isTourHighlighted={tourStep === 4}
+        onTriggerSwarm={handleTriggerSwarmRebuild}
       />
 
       {/* Main Body Content */}
@@ -391,7 +410,7 @@ export default function AjculiciousInteractiveStore({
         onFinishOrSkip={handleCloseOrFinishTour}
       />
 
-      {/* 4.1. Drawer / Modal Keranjang & Checkout WhatsApp */}
+      {/* 4.1. Drawer / Modal Keranjang & Checkout Web */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -402,6 +421,10 @@ export default function AjculiciousInteractiveStore({
         batchConfig={batchConfig}
         onOrderCreated={handleOrderCreated}
         onBrowseMenu={handleScrollToMenu}
+        onOpenOrderTrackerWithCode={(code) => {
+          setBuyerTrackerInvoiceCode(code);
+          setIsBuyerTrackerOpen(true);
+        }}
       />
 
       {/* 4.2. Modal "Lacak Kode Pesanan Saya" (Khusus Pembeli, Single Order Search) */}
@@ -412,6 +435,7 @@ export default function AjculiciousInteractiveStore({
         onUploadProof={handleUploadProof}
         onSubmitReview={handleSubmitReview}
         initialInvoiceCode={buyerTrackerInvoiceCode}
+        batchConfig={batchConfig}
       />
 
       {/* 4.3. Modal Login Admin (Otorisasi Terproteksi) */}
