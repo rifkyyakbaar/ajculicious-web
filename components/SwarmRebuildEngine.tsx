@@ -524,7 +524,7 @@ export default function SwarmRebuildEngine({
 
   return (
     <div
-      className="fixed inset-0 pointer-events-none z-[70] overflow-hidden"
+      className="fixed inset-0 pointer-events-none z-[45] overflow-hidden"
       aria-hidden="true"
     >
       {cursors.map((c) => {

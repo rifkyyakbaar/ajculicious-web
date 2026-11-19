@@ -30,6 +30,7 @@ export interface ProductRow {
 
 export interface ReviewRow {
   id: string;
+  invoice_code?: string | null;
   customer_name: string;
   faculty: string;
   rating: number;
@@ -47,6 +48,12 @@ export interface BatchSettingsRow {
   order_deadline: string;
   ready_pickup_date: string;
   ready_pickup_time: string;
+  pickup_location?: string;
+  order_open_at?: string | null;
+  order_close_at?: string | null;
+  pickup_date_iso?: string | null;
+  pickup_start_time?: string | null;
+  pickup_end_time?: string | null;
   updated_at: string;
 }
 

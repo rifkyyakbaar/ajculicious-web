@@ -33,6 +33,11 @@ import {
 } from '../data/initial_data';
 import { submitCustomerReview } from '../actions/order-actions';
 import { getStorefrontInitialData } from '../actions/catalog-actions';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
+import {
+  evaluateBatchOpenStatus,
+  formatWitaDateTimeDisplay,
+} from '../utils/batchSchedule';
 
 interface AjculiciousInteractiveStoreProps {
   initialProducts?: Product[];
@@ -74,9 +79,53 @@ export default function AjculiciousInteractiveStore({
   const [isBuyerTrackerOpen, setIsBuyerTrackerOpen] = useState(openTrackerInitially);
   const [buyerTrackerInvoiceCode, setBuyerTrackerInvoiceCode] = useState('');
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
+  const [isClosedPOModalOpen, setIsClosedPOModalOpen] = useState(false);
   const [addedToastProductId, setAddedToastProductId] = useState<string | null>(null);
   const [isSwarmRebuilding, setIsSwarmRebuilding] = useState(false);
   const [swarmTriggerCount, setSwarmTriggerCount] = useState(0);
+  const [nowTimestamp, setNowTimestamp] = useState<number | null>(null);
+
+  useBodyScrollLock(isClosedPOModalOpen);
+
+  // Perbarui jam lokal tiap 15 detik agar status buka/tutup PO berubah otomatis saat deadline lewat
+  useEffect(() => {
+    const initTimer = setTimeout(() => {
+      setNowTimestamp(Date.now());
+    }, 0);
+    const timer = setInterval(() => {
+      setNowTimestamp(Date.now());
+    }, 15000);
+    return () => {
+      clearTimeout(initTimer);
+      clearInterval(timer);
+    };
+  }, []);
+
+  const scheduleEvaluation = useMemo(() => {
+    if (nowTimestamp === null) {
+      return {
+        effectiveIsOpen: batchConfig.isOpen,
+        reason: batchConfig.isOpen ? ('OPEN' as const) : ('MANUALLY_CLOSED' as const),
+        statusLabel: batchConfig.isOpen ? 'Pre-Order Dibuka' : 'Pre-Order Ditutup',
+      };
+    }
+    return evaluateBatchOpenStatus(
+      {
+        isOpen: batchConfig.manualIsOpen ?? batchConfig.isOpen,
+        orderOpenAt: batchConfig.orderOpenAt,
+        orderCloseAt: batchConfig.orderCloseAt,
+      },
+      nowTimestamp
+    );
+  }, [batchConfig, nowTimestamp]);
+
+  const effectiveBatchConfig = useMemo<BatchPOConfig>(
+    () => ({
+      ...batchConfig,
+      isOpen: scheduleEvaluation.effectiveIsOpen,
+    }),
+    [batchConfig, scheduleEvaluation.effectiveIsOpen]
+  );
 
   const handleTriggerSwarmRebuild = () => {
     setIsSwarmRebuilding(true);
@@ -169,8 +218,12 @@ export default function AjculiciousInteractiveStore({
     [cart]
   );
 
-  // Cart Handlers (Sistem Pre-Order: Tanpa Batas Stok)
+  // Cart Handlers (Sistem Pre-Order: Ditolak + muncul popup jika PO sedang ditutup / di luar jadwal)
   const handleAddToCart = (product: Product) => {
+    if (!effectiveBatchConfig.isOpen) {
+      setIsClosedPOModalOpen(true);
+      return;
+    }
     if (!product.isActive) return;
 
     setCart((prev) => {
@@ -238,8 +291,9 @@ export default function AjculiciousInteractiveStore({
   // Review Submission Handler (Langsung tersimpan ke Tabel `reviews` di Database Supabase)
   const handleSubmitReview = async (
     newRev: Omit<ReviewRecord, 'id' | 'isApproved'>
-  ) => {
+  ): Promise<{ success: boolean; error?: string }> => {
     const res = await submitCustomerReview({
+      invoiceCode: newRev.invoiceCode,
       customerName: newRev.customerName,
       faculty: newRev.faculty,
       rating: newRev.rating,
@@ -248,7 +302,12 @@ export default function AjculiciousInteractiveStore({
     });
     if (res.success && res.data) {
       setReviews((prev) => [res.data!, ...prev]);
+      return { success: true };
     }
+    return {
+      success: false,
+      error: res.error || 'Gagal mengirim ulasan.',
+    };
   };
 
   // Admin Order Status Update
@@ -323,14 +382,18 @@ export default function AjculiciousInteractiveStore({
   return (
     <div
       data-swarm-preload={!openTrackerInitially ? 'true' : undefined}
-      className="min-h-screen bg-[#FAF6F0] text-[#3B2618] flex flex-col font-sans selection:bg-[#F2E8DC] selection:text-[#5C3A21]"
+      className="min-h-screen w-full min-w-0 bg-[#FAF6F0] text-[#3B2618] flex flex-col font-sans selection:bg-[#F2E8DC] selection:text-[#5C3A21]"
       suppressHydrationWarning
     >
       <SwarmRebuildEngine
         triggerKey={swarmTriggerCount}
         onInitialBuildComplete={() => {
           if (!openTrackerInitially) {
-            setTourStep('welcome');
+            if (!effectiveBatchConfig.isOpen) {
+              setIsClosedPOModalOpen(true);
+            } else {
+              setTourStep('welcome');
+            }
           }
         }}
       />
@@ -350,10 +413,10 @@ export default function AjculiciousInteractiveStore({
       />
 
       {/* Main Body Content */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-8 py-4 sm:py-6 space-y-6">
+      <main className="flex-1 w-full min-w-0 px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col gap-6">
         {/* 3.B. Bar Info Batch PO Aktif */}
         <BannerOrderFlow
-          batchConfig={batchConfig}
+          batchConfig={effectiveBatchConfig}
           isTourHighlighted={tourStep === 1}
         />
 
@@ -381,6 +444,8 @@ export default function AjculiciousInteractiveStore({
           cart={cart}
           onAddToCart={handleAddToCart}
           onUpdateQuantity={handleUpdateCartQuantity}
+          isOrderOpen={effectiveBatchConfig.isOpen}
+          onBlockedByClosedPO={() => setIsClosedPOModalOpen(true)}
           isTourHighlighted={tourStep === 3}
         />
 
@@ -418,13 +483,14 @@ export default function AjculiciousInteractiveStore({
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveCartItem}
         onClearCart={handleClearCart}
-        batchConfig={batchConfig}
+        batchConfig={effectiveBatchConfig}
         onOrderCreated={handleOrderCreated}
         onBrowseMenu={handleScrollToMenu}
         onOpenOrderTrackerWithCode={(code) => {
           setBuyerTrackerInvoiceCode(code);
           setIsBuyerTrackerOpen(true);
         }}
+        onBlockedByClosedPO={() => setIsClosedPOModalOpen(true)}
       />
 
       {/* 4.2. Modal "Lacak Kode Pesanan Saya" (Khusus Pembeli, Single Order Search) */}
@@ -432,10 +498,11 @@ export default function AjculiciousInteractiveStore({
         isOpen={isBuyerTrackerOpen}
         onClose={() => setIsBuyerTrackerOpen(false)}
         orders={orders}
+        reviews={reviews}
         onUploadProof={handleUploadProof}
         onSubmitReview={handleSubmitReview}
         initialInvoiceCode={buyerTrackerInvoiceCode}
-        batchConfig={batchConfig}
+        batchConfig={effectiveBatchConfig}
       />
 
       {/* 4.3. Modal Login Admin (Otorisasi Terproteksi) */}
@@ -444,6 +511,107 @@ export default function AjculiciousInteractiveStore({
         onClose={() => setIsAdminLoginModalOpen(false)}
         onLoginSuccess={handleAdminLoginSuccess}
       />
+
+      {/* 4.4. Popup Info Pre-Order Sedang Ditutup / Di Luar Jadwal */}
+      {isClosedPOModalOpen && (
+        <div
+          onClick={() => setIsClosedPOModalOpen(false)}
+          className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white border border-[#EADFD3] rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150"
+          >
+            <div className="space-y-1.5">
+              <span className="inline-block px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                {scheduleEvaluation.reason === 'NOT_YET_OPEN'
+                  ? 'Belum Dibuka'
+                  : scheduleEvaluation.reason === 'EXPIRED'
+                  ? 'Batas Order Berakhir'
+                  : 'Pre-Order Ditutup'}
+              </span>
+              <h3 className="font-extrabold text-base text-[#3B2618]">
+                {scheduleEvaluation.reason === 'NOT_YET_OPEN'
+                  ? 'Jadwal Pre-Order Belum Dimulai'
+                  : scheduleEvaluation.reason === 'EXPIRED'
+                  ? 'Waktu Pre-Order Sudah Berakhir'
+                  : 'Pemesanan Belum Dibuka Saat Ini'}
+              </h3>
+              <p className="text-xs text-[#6E523D] leading-relaxed">
+                {scheduleEvaluation.reason === 'NOT_YET_OPEN' &&
+                effectiveBatchConfig.orderOpenAt ? (
+                  <>
+                    Pemesanan untuk{' '}
+                    <strong>
+                      {effectiveBatchConfig.batchName.replace(/\s*\(Aktif\)/i, '')}
+                    </strong>{' '}
+                    akan dibuka otomatis pada{' '}
+                    <strong>
+                      {formatWitaDateTimeDisplay(effectiveBatchConfig.orderOpenAt)}
+                    </strong>
+                    .
+                  </>
+                ) : scheduleEvaluation.reason === 'EXPIRED' ? (
+                  <>
+                    Batas waktu pemesanan untuk{' '}
+                    <strong>
+                      {effectiveBatchConfig.batchName.replace(/\s*\(Aktif\)/i, '')}
+                    </strong>{' '}
+                    telah berakhir pada{' '}
+                    <strong>{effectiveBatchConfig.orderDeadline}</strong>.
+                  </>
+                ) : (
+                  <>
+                    Maaf, penerimaan pesanan baru untuk{' '}
+                    <strong>
+                      {effectiveBatchConfig.batchName.replace(/\s*\(Aktif\)/i, '')}
+                    </strong>{' '}
+                    sedang ditutup sementara oleh admin.
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#EADFD3] text-[11px] text-[#5C3A21] space-y-1">
+              <p>
+                Jadwal Pengambilan:{' '}
+                <strong className="text-[#3B2618]">
+                  {effectiveBatchConfig.readyPickupDate} (
+                  {effectiveBatchConfig.readyPickupTime})
+                </strong>
+              </p>
+              <p>
+                Lokasi Ambil:{' '}
+                <strong className="text-[#3B2618]">
+                  {effectiveBatchConfig.pickupLocations?.[0] ||
+                    'Konter Kampus AJCUlicious'}
+                </strong>
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsClosedPOModalOpen(false);
+                  setBuyerTrackerInvoiceCode('');
+                  setIsBuyerTrackerOpen(true);
+                }}
+                className="flex-1 py-2.5 px-3 rounded-xl border border-[#EADFD3] bg-white hover:bg-[#FAF6F0] text-[#5C3A21] font-bold text-xs transition"
+              >
+                Cek Pesanan
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsClosedPOModalOpen(false)}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-[#5C3A21] hover:bg-[#462B18] text-white font-bold text-xs transition"
+              >
+                Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

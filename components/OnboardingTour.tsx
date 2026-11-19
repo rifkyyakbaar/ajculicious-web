@@ -11,6 +11,7 @@ import {
   ShoppingBag,
   CheckCircle2,
 } from 'lucide-react';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 export type TourStep = 'welcome' | 1 | 2 | 3 | 4 | null;
 
@@ -78,6 +79,8 @@ export default function OnboardingTour({
   onChangeStep,
   onFinishOrSkip,
 }: OnboardingTourProps) {
+  useBodyScrollLock(Boolean(currentStep));
+
   useEffect(() => {
     if (typeof currentStep === 'number') {
       const stepData = TOUR_STEPS.find((s) => s.stepNumber === currentStep);
@@ -98,7 +101,7 @@ export default function OnboardingTour({
 
   if (currentStep === 'welcome') {
     return (
-      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+      <div className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
         <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 relative animate-in zoom-in-95 duration-150">
           <button
             type="button"
@@ -161,11 +164,11 @@ export default function OnboardingTour({
     <>
       <div
         onClick={onFinishOrSkip}
-        className="fixed inset-0 z-40 bg-black/40 transition-opacity duration-200"
+        className="fixed inset-0 !m-0 z-[55] bg-black/40 transition-opacity duration-200"
       />
 
       <div
-        className={`fixed z-50 w-[90vw] max-w-sm ${activeDetail.popupPositionClass} transition-all duration-200 animate-in fade-in zoom-in-95`}
+        className={`fixed z-[60] w-[90vw] max-w-sm ${activeDetail.popupPositionClass} transition-all duration-200 animate-in fade-in zoom-in-95`}
       >
         <div className="bg-white border border-[#D8C2A8] rounded-2xl p-4 shadow-2xl space-y-3">
           <div className="flex items-center justify-between">

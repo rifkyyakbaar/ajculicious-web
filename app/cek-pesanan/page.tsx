@@ -6,7 +6,7 @@ import { getStorefrontInitialData } from '@/actions/catalog-actions';
 export const metadata: Metadata = {
   title: 'Cek Status Pesanan — AJCUlicious',
   description:
-    'Cek status pesanan Pre-Order AJCUlicious Anda secara real-time menggunakan Kode Invoice (AJC-YYMMDD-XXX) atau Nama Pemesan.',
+    'Cek status pesanan Pre-Order AJCUlicious Anda secara real-time menggunakan Kode Invoice lengkap (contoh: AJCU-7K4M9P).',
 };
 
 async function TrackerLoader() {

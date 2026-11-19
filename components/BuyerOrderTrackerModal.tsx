@@ -10,6 +10,7 @@ import {
   Loader2,
   Calendar,
   Clock,
+  MapPin,
   Check,
   Eye,
 } from 'lucide-react';
@@ -24,13 +25,17 @@ import {
   formatRupiah,
   getSavedInvoicesFromBrowserHistory,
 } from '../utils/formatters';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 interface BuyerOrderTrackerModalProps {
   isOpen: boolean;
   onClose: () => void;
   orders: OrderRecord[];
+  reviews?: ReviewRecord[];
   onUploadProof?: (orderId: string, proofUrl: string) => void;
-  onSubmitReview: (review: Omit<ReviewRecord, 'id' | 'isApproved'>) => void;
+  onSubmitReview: (
+    review: Omit<ReviewRecord, 'id' | 'isApproved'>
+  ) => Promise<{ success: boolean; error?: string }> | void;
   initialInvoiceCode?: string;
   batchConfig?: BatchPOConfig;
 }
@@ -38,6 +43,7 @@ interface BuyerOrderTrackerModalProps {
 export default function BuyerOrderTrackerModal({
   isOpen,
   onClose,
+  reviews = [],
   onSubmitReview,
   initialInvoiceCode = '',
   batchConfig = INITIAL_BATCH_CONFIG,
@@ -50,10 +56,13 @@ export default function BuyerOrderTrackerModal({
 
   const [reviewOrderId, setReviewOrderId] = useState<string | null>(null);
   const [reviewName, setReviewName] = useState('');
-  const [reviewFaculty, setReviewFaculty] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
+  const [reviewError, setReviewError] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewSuccess, setReviewSuccess] = useState(false);
+
+  useBodyScrollLock(isOpen);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -82,9 +91,11 @@ export default function BuyerOrderTrackerModal({
   if (!isOpen) return null;
 
   const handleSearch = async (queryText: string) => {
-    const q = queryText.trim();
-    if (!q || q.length < 2) {
-      setSearchError('Masukkan minimal 2 karakter Kode Invoice atau Nama.');
+    const cleanCode = queryText.trim().replace(/^#/, '').toUpperCase();
+    if (!cleanCode || cleanCode.length < 6) {
+      setSearchError(
+        'Masukkan Kode Invoice lengkap Anda (contoh: AJCU-7K4M9P), lalu klik Cari.'
+      );
       return;
     }
 
@@ -92,7 +103,7 @@ export default function BuyerOrderTrackerModal({
     setSearchError('');
     setHasSearched(true);
 
-    const res = await getOrderByInvoice(q);
+    const res = await getOrderByInvoice(cleanCode);
     if (!res.success) {
       setSearchError(res.error || 'Gagal mencari pesanan.');
       setFoundOrders([]);
@@ -102,16 +113,24 @@ export default function BuyerOrderTrackerModal({
     setIsSearching(false);
   };
 
-  const handleSendReview = (e: React.FormEvent, menuOrdered: string) => {
+  const handleSendReview = async (
+    e: React.FormEvent,
+    invoiceCode: string,
+    menuOrdered: string
+  ) => {
     e.preventDefault();
     if (!reviewName.trim() || !reviewComment.trim()) return;
 
-    onSubmitReview({
+    setReviewError('');
+    setIsSubmittingReview(true);
+
+    const result = await onSubmitReview({
+      invoiceCode,
       customerName: reviewName.trim(),
-      faculty: reviewFaculty.trim() || 'Pelanggan',
+      faculty: 'Pembeli Terverifikasi',
       rating: reviewRating,
       menuOrdered,
-      comment: reviewComment.trim(),
+      comment: reviewComment.trim().slice(0, 180),
       date: new Date().toLocaleDateString('id-ID', {
         day: 'numeric',
         month: 'short',
@@ -119,11 +138,20 @@ export default function BuyerOrderTrackerModal({
       }),
     });
 
+    setIsSubmittingReview(false);
+
+    if (result && !result.success) {
+      setReviewError(result.error || 'Gagal mengirim ulasan.');
+      return;
+    }
+
     setReviewSuccess(true);
+    setReviewComment('');
     setTimeout(() => {
       setReviewOrderId(null);
       setReviewSuccess(false);
-    }, 2000);
+      setReviewError('');
+    }, 1800);
   };
 
   const getDbStatusBadge = (status: DbOrderStatus) => {
@@ -156,7 +184,7 @@ export default function BuyerOrderTrackerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-lg w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-5 py-4 border-b border-[#EADFD3] flex items-center justify-between">
@@ -165,7 +193,7 @@ export default function BuyerOrderTrackerModal({
               Cek Status Pesanan
             </h3>
             <p className="text-xs text-[#8C6D53]">
-              Cari dengan Kode Invoice atau Nama Pemesan
+              Masukkan Kode Invoice lengkap lalu klik Cari
             </p>
           </div>
 
@@ -194,9 +222,12 @@ export default function BuyerOrderTrackerModal({
                 type="text"
                 suppressHydrationWarning
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Contoh: AJC-261117-001 atau Nama..."
-                className="w-full pl-9 pr-4 py-2 rounded-xl border border-[#EADFD3] bg-white text-xs text-[#3B2618] focus:outline-none focus:ring-2 focus:ring-[#5C3A21]"
+                onChange={(e) => {
+                  setSearchQuery(e.target.value.toUpperCase());
+                  if (searchError) setSearchError('');
+                }}
+                placeholder="Masukkan kode lengkap, misal: AJCU-7K4M9P"
+                className="w-full pl-9 pr-4 py-2 rounded-xl border border-[#EADFD3] bg-white text-xs font-mono text-[#3B2618] focus:outline-none focus:ring-2 focus:ring-[#5C3A21]"
                 required
               />
             </div>
@@ -228,10 +259,10 @@ export default function BuyerOrderTrackerModal({
             <div className="text-center py-10 space-y-1.5">
               <Search className="w-7 h-7 text-[#C4A98E] mx-auto" />
               <p className="text-xs font-semibold text-[#3B2618]">
-                Masukkan Kode Invoice atau Nama Anda
+                Masukkan Kode Invoice Lengkap Anda
               </p>
               <p className="text-[11px] text-[#8C6D53]">
-                Contoh kode: <code>AJC-261117-001</code>
+                Contoh kode: <code>AJCU-7K4M9P</code> lalu klik tombol Cari.
               </p>
             </div>
           ) : isSearching ? (
@@ -246,7 +277,7 @@ export default function BuyerOrderTrackerModal({
                 Pesanan tidak ditemukan
               </p>
               <p className="text-[11px] text-[#8C6D53]">
-                Pastikan kode invoice atau nama sudah benar.
+                Pastikan seluruh kode invoice sudah diketik dengan lengkap dan benar.
               </p>
             </div>
           ) : (
@@ -314,15 +345,27 @@ export default function BuyerOrderTrackerModal({
                 </div>
 
                 {/* Info Jadwal Pengambilan */}
-                <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200 flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-950">
-                  <span className="flex items-center gap-1 font-semibold">
-                    <Calendar className="w-3.5 h-3.5 text-[#5C3A21]" />
-                    Ambil: <strong>{batchConfig.readyPickupDate}</strong>
-                  </span>
-                  <span className="flex items-center gap-1 font-semibold">
-                    <Clock className="w-3.5 h-3.5 text-[#5C3A21]" />
-                    Jam: <strong>{batchConfig.readyPickupTime}</strong>
-                  </span>
+                <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200 space-y-1 text-[11px] text-amber-950">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-1 font-semibold">
+                      <Calendar className="w-3.5 h-3.5 text-[#5C3A21]" />
+                      Ambil: <strong>{batchConfig.readyPickupDate}</strong>
+                    </span>
+                    <span className="flex items-center gap-1 font-semibold">
+                      <Clock className="w-3.5 h-3.5 text-[#5C3A21]" />
+                      Jam: <strong>{batchConfig.readyPickupTime}</strong>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 font-semibold">
+                    <MapPin className="w-3.5 h-3.5 text-[#5C3A21] shrink-0" />
+                    <span>
+                      Lokasi:{' '}
+                      <strong>
+                        {batchConfig.pickupLocations?.[0] ||
+                          'Konter Kampus AJCUlicious'}
+                      </strong>
+                    </span>
+                  </div>
                 </div>
 
                 {order.payment_proof_url && (
@@ -355,11 +398,21 @@ export default function BuyerOrderTrackerModal({
 
                 {order.status === 'SELESAI' && (
                   <div>
-                    {reviewOrderId === order.id ? (
+                    {reviews.some(
+                      (r) =>
+                        r.invoiceCode?.toUpperCase() ===
+                        order.invoice_code.toUpperCase()
+                    ) ? (
+                      <div className="w-full py-2 px-3 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-800 flex items-center justify-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Ulasan untuk invoice ini sudah dikirim</span>
+                      </div>
+                    ) : reviewOrderId === order.id ? (
                       <form
                         onSubmit={(e) =>
                           handleSendReview(
                             e,
+                            order.invoice_code,
                             (order.order_items ?? [])
                               .map((i) => i.product_name_snapshot)
                               .join(', ')
@@ -393,35 +446,47 @@ export default function BuyerOrderTrackerModal({
                               </div>
                               <button
                                 type="button"
-                                onClick={() => setReviewOrderId(null)}
+                                onClick={() => {
+                                  setReviewOrderId(null);
+                                  setReviewError('');
+                                }}
                                 className="text-[11px] text-[#8C6D53]"
                               >
                                 Batal
                               </button>
                             </div>
 
-                            <input
-                              type="text"
-                              value={reviewFaculty}
-                              onChange={(e) => setReviewFaculty(e.target.value)}
-                              placeholder="Fakultas / Keterangan (opsional)"
-                              className="w-full px-3 py-1.5 rounded-lg border border-[#EADFD3] bg-white text-xs"
-                            />
+                            <div>
+                              <textarea
+                                rows={2}
+                                maxLength={180}
+                                value={reviewComment}
+                                onChange={(e) =>
+                                  setReviewComment(e.target.value)
+                                }
+                                placeholder="Tulis ulasan singkat (maks. 180 karakter)..."
+                                className="w-full px-3 py-1.5 rounded-lg border border-[#EADFD3] bg-white text-xs"
+                                required
+                              />
+                              <p className="text-[10px] text-[#8C6D53] text-right mt-0.5">
+                                {reviewComment.length}/180
+                              </p>
+                            </div>
 
-                            <textarea
-                              rows={2}
-                              value={reviewComment}
-                              onChange={(e) => setReviewComment(e.target.value)}
-                              placeholder="Tulis ulasan singkat..."
-                              className="w-full px-3 py-1.5 rounded-lg border border-[#EADFD3] bg-white text-xs"
-                              required
-                            />
+                            {reviewError && (
+                              <p className="text-[11px] font-semibold text-rose-600">
+                                {reviewError}
+                              </p>
+                            )}
 
                             <button
                               type="submit"
-                              className="w-full py-1.5 rounded-lg bg-[#5C3A21] text-white font-semibold text-xs"
+                              disabled={isSubmittingReview}
+                              className="w-full py-1.5 rounded-lg bg-[#5C3A21] text-white font-semibold text-xs disabled:opacity-60"
                             >
-                              Kirim Ulasan
+                              {isSubmittingReview
+                                ? 'Mengirim...'
+                                : 'Kirim Ulasan'}
                             </button>
                           </>
                         )}
@@ -432,6 +497,7 @@ export default function BuyerOrderTrackerModal({
                         onClick={() => {
                           setReviewOrderId(order.id);
                           setReviewName(order.customer_name);
+                          setReviewError('');
                         }}
                         className="w-full py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] text-xs font-semibold text-[#5C3A21] hover:bg-[#F2E8DC] flex items-center justify-center gap-1.5 transition"
                       >

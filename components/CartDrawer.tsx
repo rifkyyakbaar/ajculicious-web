@@ -42,6 +42,7 @@ import {
   inspectIndonesianPhoneNumber,
   saveInvoiceToBrowserHistory,
 } from '../utils/formatters';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -54,6 +55,7 @@ interface CartDrawerProps {
   onOrderCreated: (newOrder: OrderRecord) => void;
   onBrowseMenu: () => void;
   onOpenOrderTrackerWithCode?: (invoiceCode: string) => void;
+  onBlockedByClosedPO?: () => void;
 }
 
 const MAX_COD_TOTAL_PRICE = 100000;
@@ -70,6 +72,7 @@ export default function CartDrawer({
   onOrderCreated,
   onBrowseMenu,
   onOpenOrderTrackerWithCode,
+  onBlockedByClosedPO,
 }: CartDrawerProps) {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -120,6 +123,8 @@ export default function CartDrawer({
       setPaymentMethod('QRIS');
     }
   }, [isCodLimitExceeded, paymentMethod]);
+
+  useBodyScrollLock(isOpen || Boolean(createdOrderData));
 
   if (!isOpen) return null;
 
@@ -195,6 +200,15 @@ export default function CartDrawer({
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (honeypot) return; // Bot trap
+
+    if (!batchConfig.isOpen) {
+      setFormError(
+        'Pre-Order sedang ditutup saat ini. Pesanan baru belum dapat dikirim.'
+      );
+      onClose();
+      onBlockedByClosedPO?.();
+      return;
+    }
 
     if (cart.length === 0) {
       setFormError('Keranjang belanja masih kosong.');
@@ -385,7 +399,7 @@ export default function CartDrawer({
   // ================= POP-UP (MODAL) BERHASIL PESAN (ISI: TGL PENGAMBILAN & JAM) =================
   if (createdOrderData) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="fixed inset-0 !m-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
         <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
           {/* Header Sukses */}
           <div className="text-center space-y-2">
@@ -619,7 +633,7 @@ export default function CartDrawer({
 
   // ================= DRAWER KERANJANG & FORM PEMESANAN WEB =================
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-end">
+    <div className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-end">
       <div className="bg-white w-full max-w-md h-full flex flex-col shadow-2xl border-l border-[#EADFD3] overflow-hidden animate-in slide-in-from-right duration-200">
         {/* Header */}
         <div className="px-5 py-4 border-b border-[#EADFD3] flex items-center justify-between">
@@ -752,6 +766,15 @@ export default function CartDrawer({
               </>
             )}
           </div>
+
+          {cart.length > 0 && !batchConfig.isOpen && (
+            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-1">
+              <p className="font-bold">Pre-Order Sedang Ditutup</p>
+              <p className="text-[11px]">
+                Pemesanan baru sementara tidak dapat diproses sampai Batch PO berikutnya dibuka oleh admin.
+              </p>
+            </div>
+          )}
 
           {cart.length > 0 && (
             <form onSubmit={handleSubmitOrder} className="space-y-4 pt-1">
@@ -1092,6 +1115,11 @@ export default function CartDrawer({
                       mengambil serta membayar pesanan pada{' '}
                       <strong>
                         {batchConfig.readyPickupDate} ({batchConfig.readyPickupTime})
+                      </strong>{' '}
+                      di{' '}
+                      <strong>
+                        {batchConfig.pickupLocations?.[0] ||
+                          'Konter Kampus AJCUlicious'}
                       </strong>
                       .
                     </span>

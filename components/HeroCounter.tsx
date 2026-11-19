@@ -2,14 +2,13 @@
 
 import React, { useState } from 'react';
 import {
-  Plus,
-  Check,
   Sparkles,
   Cookie,
   UtensilsCrossed,
   PackageCheck,
   Flame,
   MousePointerClick,
+  X,
 } from 'lucide-react';
 import { TeamMember, Product, CategorySlug } from '../types/ajculicious';
 import { formatRupiah } from '../utils/formatters';
@@ -26,6 +25,14 @@ interface HeroCounterProps {
   isTourHighlighted?: boolean;
 }
 
+const FAVORITE_SLUG_MAP: Record<string, string> = {
+  'team-1': 'classic-chocochip-cookie',
+  'team-2': 'fudgy-shiny-crust-brownies',
+  'team-3': 'dubai-chewy-cookies-pistachio',
+  'team-4': 'dimsum-ayam-udang',
+  'team-5': 'lotus-biscoff-dessert-box',
+};
+
 export default function HeroCounter({
   teamMembers,
   onSelectMember,
@@ -38,17 +45,33 @@ export default function HeroCounter({
 }: HeroCounterProps) {
   const [hoveredMemberId, setHoveredMemberId] = useState<string | null>(null);
 
+  const getFavoriteProduct = (member: TeamMember, index: number) =>
+    products.find(
+      (p) =>
+        p.id === member.favoriteProductId ||
+        p.slug === FAVORITE_SLUG_MAP[member.id]
+    ) || products[index % Math.max(products.length, 1)];
+
+  const activeMobileIdx = teamMembers.findIndex(
+    (m) => m.id === hoveredMemberId
+  );
+  const activeMobileMember =
+    activeMobileIdx >= 0 ? teamMembers[activeMobileIdx] : null;
+  const activeMobileProduct = activeMobileMember
+    ? getFavoriteProduct(activeMobileMember, activeMobileIdx)
+    : null;
+
   return (
     <div
       id="tour-hero-counter"
       className={`relative transition-all duration-300 ${
         isTourHighlighted
-          ? 'z-40 ring-4 ring-amber-400 rounded-3xl shadow-2xl'
+          ? 'z-[58] ring-4 ring-amber-400 rounded-3xl shadow-2xl'
           : 'z-20'
       }`}
     >
-      <div className="relative rounded-3xl border border-[#EADFD3] shadow-sm bg-white overflow-x-auto lg:overflow-visible">
-        <div className="relative min-w-[850px] sm:min-w-[920px] w-full select-none">
+      <div className="relative rounded-3xl border border-[#EADFD3] shadow-sm bg-white overflow-visible">
+        <div className="relative w-full select-none">
           <img
             src="/images/storefront-counter.jpg"
             alt="Konter Interaktif AJCUlicious"
@@ -69,7 +92,7 @@ export default function HeroCounter({
             className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
             aria-label="Lihat Menu"
           >
-            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+            <span className="hidden md:flex opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md items-center gap-1 whitespace-nowrap">
               <MousePointerClick className="w-3 h-3 text-amber-300" />
               <span>Lihat Menu</span>
             </span>
@@ -83,7 +106,7 @@ export default function HeroCounter({
             className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
             aria-label="Lihat Katalog Menu"
           >
-            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+            <span className="hidden md:flex opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md items-center gap-1 whitespace-nowrap">
               <Sparkles className="w-3 h-3 text-amber-300" />
               <span>Lihat Semua Menu</span>
             </span>
@@ -97,7 +120,7 @@ export default function HeroCounter({
             className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
             aria-label="Menu Cookies"
           >
-            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+            <span className="hidden md:flex opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md items-center gap-1 whitespace-nowrap">
               <Cookie className="w-3 h-3 text-amber-300" />
               <span>Menu Cookies</span>
             </span>
@@ -111,7 +134,7 @@ export default function HeroCounter({
             className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
             aria-label="Menu Dimsum"
           >
-            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+            <span className="hidden md:flex opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md items-center gap-1 whitespace-nowrap">
               <UtensilsCrossed className="w-3 h-3 text-amber-300" />
               <span>Menu Dimsum</span>
             </span>
@@ -125,7 +148,7 @@ export default function HeroCounter({
             className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
             aria-label="Cek Pesanan"
           >
-            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+            <span className="hidden md:flex opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md items-center gap-1 whitespace-nowrap">
               <PackageCheck className="w-3 h-3 text-amber-300" />
               <span>Cek Pesanan</span>
             </span>
@@ -135,11 +158,16 @@ export default function HeroCounter({
             type="button"
             suppressHydrationWarning
             onClick={() => onFilterCategory('brownies')}
-            style={{ left: '85.5%', top: '46.5%', width: '13.8%', height: '25.5%' }}
+            style={{
+              left: '85.5%',
+              top: '46.5%',
+              width: '13.8%',
+              height: '25.5%',
+            }}
             className="absolute group bg-transparent focus:outline-none cursor-pointer z-20 flex items-center justify-center"
             aria-label="Menu Brownies"
           >
-            <span className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap">
+            <span className="hidden md:flex opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 pointer-events-none bg-[#3B2618]/95 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md items-center gap-1 whitespace-nowrap">
               <Flame className="w-3 h-3 text-amber-300" />
               <span>Menu Brownies</span>
             </span>
@@ -148,31 +176,19 @@ export default function HeroCounter({
           {/* Karakter Anggota Tim */}
           {teamMembers.map((member, index) => {
             const isHovered = hoveredMemberId === member.id;
-            const favoriteSlugMap: Record<string, string> = {
-              'team-1': 'classic-chocochip-cookie',
-              'team-2': 'fudgy-shiny-crust-brownies',
-              'team-3': 'dubai-chewy-cookies-pistachio',
-              'team-4': 'dimsum-ayam-udang',
-              'team-5': 'lotus-biscoff-dessert-box',
-            };
-            const favoriteProduct =
-              products.find(
-                (p) =>
-                  p.id === member.favoriteProductId ||
-                  p.slug === favoriteSlugMap[member.id]
-              ) || products[index % Math.max(products.length, 1)];
+            const favoriteProduct = getFavoriteProduct(member, index);
 
             const bubblePositionClass =
-              index === 0
+              index <= 1
                 ? 'left-0'
-                : index === teamMembers.length - 1
+                : index >= teamMembers.length - 2
                 ? 'right-0'
                 : 'left-1/2 -translate-x-1/2';
 
             const tailPositionClass =
-              index === 0
+              index <= 1
                 ? 'left-10'
-                : index === teamMembers.length - 1
+                : index >= teamMembers.length - 2
                 ? 'right-12'
                 : 'left-1/2 -translate-x-1/2';
 
@@ -200,10 +216,11 @@ export default function HeroCounter({
                   isHovered ? 'z-30' : 'z-10'
                 }`}
               >
+                {/* Bubble mengambang khusus layar md+ (aman tidak kepotong) */}
                 {isHovered && (
                   <div
                     onClick={(e) => e.stopPropagation()}
-                    className={`absolute bottom-full pb-2.5 ${bubblePositionClass} w-72 sm:w-80 z-40 animate-in fade-in zoom-in-95 duration-150`}
+                    className={`hidden md:block absolute bottom-full pb-2.5 ${bubblePositionClass} w-72 lg:w-80 z-40 animate-in fade-in zoom-in-95 duration-150`}
                   >
                     <div className="relative bg-white border border-[#D8C2A8] rounded-2xl p-3 shadow-xl text-left space-y-2">
                       <div className="flex items-center justify-between gap-2">
@@ -255,6 +272,62 @@ export default function HeroCounter({
               </div>
             );
           })}
+        </div>
+
+        {/* Panel Bubble Khusus Layar Mobile (< md): selalu utuh dan tidak pernah kepotong */}
+        <div className="block md:hidden border-t border-[#F2E8DC] px-3.5 py-2.5 bg-[#FFFDF9] rounded-b-3xl">
+          {activeMobileMember ? (
+            <div className="space-y-2 animate-in fade-in duration-150">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-xs text-[#3B2618]">
+                    {activeMobileMember.name}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FAF6F0] text-[#7D5E46] font-medium border border-[#EADFD3] truncate">
+                    {activeMobileMember.role}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHoveredMemberId(null)}
+                  className="p-1 rounded-full hover:bg-[#FAF6F0] text-[#8C6D53]"
+                  aria-label="Tutup rekomendasi"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-[#5C3A21] leading-relaxed">
+                &ldquo;{activeMobileMember.greeting}&rdquo;
+              </p>
+
+              {activeMobileProduct && (
+                <div className="pt-2 border-t border-[#F2E8DC] flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-bold text-xs text-[#3B2618] truncate">
+                      {activeMobileProduct.name}
+                    </p>
+                    <span className="text-[11px] font-semibold text-[#7D5E46]">
+                      {formatRupiah(activeMobileProduct.price)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onAddToCart(activeMobileProduct)}
+                    className="px-3 py-1.5 rounded-lg bg-[#5C3A21] text-white text-[11px] font-bold hover:bg-[#462B18] active:scale-95 transition-all shrink-0"
+                  >
+                    {addedToastProduct === activeMobileProduct.id
+                      ? 'Ditambah'
+                      : '+ Tambah'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-[11px] text-center text-[#8C6D53] font-medium">
+              Ketuk salah satu karakter di konter untuk melihat rekomendasi menu
+            </p>
+          )}
         </div>
       </div>
     </div>

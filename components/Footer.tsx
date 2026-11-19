@@ -14,7 +14,7 @@ interface FooterProps {
 export default function Footer({ onOpenAdminLogin }: FooterProps) {
   return (
     <footer className="mt-12 bg-white border-t border-[#EADFD3] py-6 text-[#462B18]">
-      <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
+      <div className="w-full px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-full bg-white border border-[#EADFD3] overflow-hidden flex items-center justify-center shrink-0">
             <img

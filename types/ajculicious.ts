@@ -21,6 +21,8 @@ export interface Product {
   imageUrl?: string | null;
   ingredients?: string[];
   isActive: boolean;
+  totalSold?: number;
+  isBestSeller?: boolean;
 }
 
 export interface CartItem {
@@ -84,6 +86,7 @@ export interface OrderRecord {
 
 export interface ReviewRecord {
   id: string;
+  invoiceCode?: string;
   customerName: string;
   faculty: string;
   rating: number; // 1-5
@@ -106,8 +109,14 @@ export interface BatchPOConfig {
   batchNumber: number;
   batchName: string;
   isOpen: boolean;
-  orderDeadline: string; // e.g. "Kamis, 20 Nov 2026, 21:00 WITA"
-  readyPickupDate: string; // e.g. "Jumat, 21 Nov 2026"
+  manualIsOpen?: boolean;
+  orderOpenAt?: string | null;
+  orderCloseAt?: string | null;
+  orderDeadline: string; // e.g. "Kamis, 19 Nov 2026, 21:00 WITA"
+  pickupDateIso?: string | null;
+  pickupStartTime?: string;
+  pickupEndTime?: string;
+  readyPickupDate: string; // e.g. "Jumat, 20 Nov 2026"
   readyPickupTime: string; // e.g. "13:00 - 17:00 WITA"
   pickupLocations: string[];
 }

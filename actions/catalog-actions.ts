@@ -1,5 +1,6 @@
 'use server';
 
+import { connection } from 'next/server';
 import { createSupabaseServerClient } from '../lib/supabase/server';
 import {
   BatchSettingsRow,
@@ -13,6 +14,7 @@ import {
   Product,
   ReviewRecord,
 } from '../types/ajculicious';
+import { evaluateBatchOpenStatus } from '../utils/batchSchedule';
 
 const EMOJI_BY_CATEGORY: Record<string, string> = {
   'dubai-cookies': '🍪',
@@ -22,7 +24,11 @@ const EMOJI_BY_CATEGORY: Record<string, string> = {
   dimsum: '🥟',
 };
 
-function mapDbProductToUiProduct(row: ProductRow): Product {
+function mapDbProductToUiProduct(
+  row: ProductRow,
+  totalSold = 0,
+  isBestSeller = false
+): Product {
   const catSlug = (row.categories?.slug || 'cookies') as CategorySlug;
   const catName = row.categories?.name || 'Cookies';
   const emoji =
@@ -49,8 +55,10 @@ function mapDbProductToUiProduct(row: ProductRow): Product {
     ingredients:
       row.ingredients && row.ingredients.length > 0
         ? row.ingredients
-        : ['Bahan Pilihan Premium', 'Fresh Homemade'],
+        : [],
     isActive: row.is_available,
+    totalSold,
+    isBestSeller,
   };
 }
 
@@ -95,10 +103,83 @@ export async function getCatalogProducts(
       query = query.eq('categories.slug', categorySlug);
     }
 
-    const { data, error } = await query;
+    const needsGlobalRankingMeta = Boolean(categorySlug && categorySlug !== 'all');
+    const [{ data, error }, { data: salesRows }, globalMetaRes] = await Promise.all([
+      query,
+      supabase
+        .from('order_items')
+        .select('product_id, quantity, orders!inner(status)')
+        .neq('orders.status', 'BATAL'),
+      needsGlobalRankingMeta
+        ? supabase
+            .from('products')
+            .select('id, slug, name, created_at')
+            .eq('is_available', true)
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: null }),
+    ]);
+
     if (error || !data) return [];
 
-    return (data as unknown as ProductRow[]).map(mapDbProductToUiProduct);
+    // Hitung total checkout per produk (kecuali pesanan yang dibatalkan)
+    const soldMap = new Map<string, number>();
+    if (Array.isArray(salesRows)) {
+      for (const item of salesRows as Array<{
+        product_id: string;
+        quantity: number;
+      }>) {
+        soldMap.set(
+          item.product_id,
+          (soldMap.get(item.product_id) ?? 0) + (item.quantity || 0)
+        );
+      }
+    }
+
+    const productRows = data as unknown as ProductRow[];
+    const rankingRows = (
+      needsGlobalRankingMeta && Array.isArray(globalMetaRes.data)
+        ? (globalMetaRes.data as Array<{ id: string; slug: string; name: string }>)
+        : productRows
+    );
+
+    const isBrownies200 = (r: { slug: string; name: string }) =>
+      r.slug === 'brownies-200g' || r.name.trim().toLowerCase() === 'brownies (200g)';
+    const isBrowniesMain = (r: { slug: string; name: string }) =>
+      r.slug === 'fudgy-shiny-crust-brownies' || r.name.trim().toLowerCase() === 'brownies';
+
+    const brownies200Row = rankingRows.find(isBrownies200);
+    const browniesMainRow = rankingRows.find(
+      (r) => r.id !== brownies200Row?.id && isBrowniesMain(r)
+    );
+
+    const effectiveSoldMap = new Map(soldMap);
+    if (brownies200Row && browniesMainRow) {
+      effectiveSoldMap.set(
+        browniesMainRow.id,
+        (effectiveSoldMap.get(browniesMainRow.id) ?? 0) +
+          (effectiveSoldMap.get(brownies200Row.id) ?? 0)
+      );
+    }
+
+    // Ambil maksimal Top 3 menu dengan jumlah checkout terbanyak
+    const top3Ids = new Set(
+      rankingRows
+        .filter((r) => !(browniesMainRow && brownies200Row && r.id === brownies200Row.id))
+        .map((r) => ({ id: r.id, sold: effectiveSoldMap.get(r.id) ?? 0 }))
+        .filter((entry) => entry.sold > 0)
+        .sort((a, b) => b.sold - a.sold)
+        .slice(0, 3)
+        .map((entry) => entry.id)
+    );
+
+    return productRows.map((row) => {
+      const sold = effectiveSoldMap.get(row.id) ?? 0;
+      const isHiddenVariant = Boolean(
+        browniesMainRow && brownies200Row && row.id === brownies200Row.id
+      );
+      const isBest = !isHiddenVariant && top3Ids.has(row.id);
+      return mapDbProductToUiProduct(row, sold, isBest);
+    });
   } catch {
     return [];
   }
@@ -117,6 +198,7 @@ export async function getReviewsFromDb(): Promise<ReviewRecord[]> {
 
     return (data as ReviewRow[]).map((r) => ({
       id: r.id,
+      invoiceCode: r.invoice_code || undefined,
       customerName: r.customer_name,
       faculty: r.faculty,
       rating: r.rating,
@@ -135,14 +217,32 @@ export async function getReviewsFromDb(): Promise<ReviewRecord[]> {
 }
 
 export async function getBatchSettingsFromDb(): Promise<BatchPOConfig> {
+  // Pastikan jadwal buka/tutup PO hanya dievaluasi saat request masuk (bukan saat prerender)
+  await connection();
+  const nowMs = Date.now();
+
+  const defaultEval = evaluateBatchOpenStatus(
+    {
+      isOpen: true,
+      orderOpenAt: '2026-11-18T08:00:00+08:00',
+      orderCloseAt: '2026-11-19T21:00:00+08:00',
+    },
+    nowMs
+  );
   const defaultBatch: BatchPOConfig = {
     batchNumber: 4,
     batchName: 'Batch #4 - November Sweet Week',
-    isOpen: true,
+    isOpen: defaultEval.effectiveIsOpen,
+    manualIsOpen: true,
+    orderOpenAt: '2026-11-18T08:00:00+08:00',
+    orderCloseAt: '2026-11-19T21:00:00+08:00',
     orderDeadline: 'Kamis, 19 Nov 2026, 21:00 WITA',
+    pickupDateIso: '2026-11-20',
+    pickupStartTime: '13:00',
+    pickupEndTime: '17:00',
     readyPickupDate: 'Jumat, 20 Nov 2026',
     readyPickupTime: '13:00 - 17:00 WITA',
-    pickupLocations: ['Konter AJCUlicious'],
+    pickupLocations: ['Konter Kampus AJCUlicious'],
   };
 
   try {
@@ -155,15 +255,30 @@ export async function getBatchSettingsFromDb(): Promise<BatchPOConfig> {
 
     if (error || !data) return defaultBatch;
     const row = data as BatchSettingsRow;
+    const loc = row.pickup_location?.trim() || 'Konter Kampus AJCUlicious';
+    const evalResult = evaluateBatchOpenStatus(
+      {
+        isOpen: row.is_open,
+        orderOpenAt: row.order_open_at,
+        orderCloseAt: row.order_close_at,
+      },
+      nowMs
+    );
 
     return {
       batchNumber: row.batch_number,
       batchName: row.batch_name,
-      isOpen: row.is_open,
+      isOpen: evalResult.effectiveIsOpen,
+      manualIsOpen: row.is_open,
+      orderOpenAt: row.order_open_at ?? null,
+      orderCloseAt: row.order_close_at ?? null,
       orderDeadline: row.order_deadline,
+      pickupDateIso: row.pickup_date_iso ?? '2026-11-20',
+      pickupStartTime: row.pickup_start_time ?? '13:00',
+      pickupEndTime: row.pickup_end_time ?? '17:00',
       readyPickupDate: row.ready_pickup_date,
       readyPickupTime: row.ready_pickup_time,
-      pickupLocations: ['Konter AJCUlicious'],
+      pickupLocations: [loc],
     };
   } catch {
     return defaultBatch;

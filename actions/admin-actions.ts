@@ -236,16 +236,29 @@ export async function sendReadyPickupWhatsAppViaFonnte(
           orderRow.total_price
         )})`;
 
+    const { data: batchRow } = await supabase
+      .from('batch_settings')
+      .select('ready_pickup_date, ready_pickup_time, pickup_location')
+      .eq('id', 1)
+      .single();
+
+    const pickupLocStr =
+      batchRow?.pickup_location?.trim() || 'Konter Kampus AJCUlicious';
+    const pickupDateStr = batchRow?.ready_pickup_date || 'Sesuai jadwal PO';
+    const pickupTimeStr = batchRow?.ready_pickup_time || 'Sesuai jam PO';
+
     const readyWaMsg = [
       `Halo ${orderRow.customer_name},`,
       `Pesanan Pre-Order AJCUlicious Anda saat ini sudah SIAP DIAMBIL:`,
       ``,
       `Kode Invoice: #${orderRow.invoice_code}`,
       `Status Pembayaran: ${paymentInfo}`,
+      `Lokasi Ambil: ${pickupLocStr}`,
+      `Jadwal Ambil: ${pickupDateStr} (${pickupTimeStr})`,
       `Rincian Pesanan:`,
       itemList,
       ``,
-      `Silakan tunjukkan kode invoice #${orderRow.invoice_code} saat pengambilan pesanan di konter. Terima kasih.`,
+      `Silakan tunjukkan kode invoice #${orderRow.invoice_code} saat pengambilan pesanan di ${pickupLocStr}. Terima kasih.`,
     ].join('\n');
 
     const res = await sendFonnteWhatsAppMessage(
@@ -483,20 +496,45 @@ export async function updateProductStockAndAvailability(
 export async function updateBatchSettingsInDb(input: {
   batchName: string;
   isOpen: boolean;
+  orderOpenAt?: string | null;
+  orderCloseAt?: string | null;
   orderDeadline: string;
+  pickupDateIso?: string | null;
+  pickupStartTime?: string;
+  pickupEndTime?: string;
   readyPickupDate: string;
   readyPickupTime: string;
+  pickupLocation?: string;
 }): Promise<ActionResponse<boolean>> {
   try {
+    if (input.orderOpenAt && input.orderCloseAt) {
+      const openMs = Date.parse(input.orderOpenAt);
+      const closeMs = Date.parse(input.orderCloseAt);
+      if (!Number.isNaN(openMs) && !Number.isNaN(closeMs) && closeMs <= openMs) {
+        return {
+          success: false,
+          error:
+            'Batas tutup Pre-Order harus lebih lambat daripada waktu buka Pre-Order.',
+        };
+      }
+    }
+
     const supabase = createSupabaseServerClient();
     const { error } = await supabase
       .from('batch_settings')
       .update({
         batch_name: input.batchName.trim(),
         is_open: input.isOpen,
+        order_open_at: input.orderOpenAt ?? null,
+        order_close_at: input.orderCloseAt ?? null,
         order_deadline: input.orderDeadline.trim(),
+        pickup_date_iso: input.pickupDateIso || null,
+        pickup_start_time: input.pickupStartTime?.trim() || '13:00',
+        pickup_end_time: input.pickupEndTime?.trim() || '17:00',
         ready_pickup_date: input.readyPickupDate.trim(),
         ready_pickup_time: input.readyPickupTime.trim(),
+        pickup_location:
+          input.pickupLocation?.trim() || 'Konter Kampus AJCUlicious',
         updated_at: new Date().toISOString(),
       })
       .eq('id', 1);
@@ -509,6 +547,8 @@ export async function updateBatchSettingsInDb(input: {
     }
 
     revalidatePath('/');
+    revalidatePath('/cek-pesanan');
+    revalidatePath('/admin');
     return { success: true, data: true };
   } catch (err: unknown) {
     return {

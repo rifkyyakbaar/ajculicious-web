@@ -320,7 +320,7 @@ export default function AdminDashboardModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+    <div className="fixed inset-0 !m-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
       <div className="bg-[#FFFDF9] border border-[#E6D8C7] rounded-3xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         {/* ================= HEADER MODAL ================= */}
         <div className="px-5 py-4 bg-[#FAF6F0] border-b border-[#E6D8C7] flex items-center justify-between">

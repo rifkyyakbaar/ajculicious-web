@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { loginAdmin } from '../actions/admin-actions';
 import { AdminUserProfile } from '../types/database';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ export default function AdminLoginModal({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
@@ -54,7 +57,7 @@ export default function AdminLoginModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
       <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between">

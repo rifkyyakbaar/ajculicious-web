@@ -63,6 +63,15 @@ import {
 } from '../actions/admin-actions';
 import { getCatalogProducts } from '../actions/catalog-actions';
 import { formatRupiah } from '../utils/formatters';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
+import {
+  evaluateBatchOpenStatus,
+  isoToWitaDateTimeLocal,
+  witaDateTimeLocalToIso,
+  formatWitaDateTimeDisplay,
+  formatWitaDateOnlyDisplay,
+  formatPickupTimeRange,
+} from '../utils/batchSchedule';
 
 interface AdminDashboardViewProps {
   adminProfile?: AdminUserProfile | null;
@@ -166,6 +175,7 @@ export default function AdminDashboardView({
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [sendingWaId, setSendingWaId] = useState<string | null>(null);
+  const [sentReadyWaIds, setSentReadyWaIds] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Filter & Search States
@@ -193,23 +203,44 @@ export default function AdminDashboardView({
   const [menuDesc, setMenuDesc] = useState('');
   const [isSavingMenu, setIsSavingMenu] = useState(false);
 
-  // Form Jadwal Batch PO
+  // Form Jadwal Batch PO (Berbasis Date & Time Picker WITA Otomatis)
   const [batchNameInput, setBatchNameInput] = useState(
     batchConfig?.batchName || 'Batch #4 - November Sweet Week'
   );
-  const [batchDeadlineInput, setBatchDeadlineInput] = useState(
-    batchConfig?.orderDeadline || 'Kamis, 19 Nov 2026, 21:00 WITA'
+  const [batchOpenAtInput, setBatchOpenAtInput] = useState(
+    isoToWitaDateTimeLocal(batchConfig?.orderOpenAt) || '2026-11-18T08:00'
   );
-  const [batchPickupDateInput, setBatchPickupDateInput] = useState(
-    batchConfig?.readyPickupDate || 'Jumat, 20 Nov 2026'
+  const [batchCloseAtInput, setBatchCloseAtInput] = useState(
+    isoToWitaDateTimeLocal(batchConfig?.orderCloseAt) || '2026-11-19T21:00'
   );
-  const [batchPickupTimeInput, setBatchPickupTimeInput] = useState(
-    batchConfig?.readyPickupTime || '13:00 - 17:00 WITA'
+  const [batchPickupDateIsoInput, setBatchPickupDateIsoInput] = useState(
+    batchConfig?.pickupDateIso || '2026-11-20'
+  );
+  const [batchPickupStartTimeInput, setBatchPickupStartTimeInput] = useState(
+    batchConfig?.pickupStartTime || '13:00'
+  );
+  const [batchPickupEndTimeInput, setBatchPickupEndTimeInput] = useState(
+    batchConfig?.pickupEndTime || '17:00'
+  );
+  const [batchPickupLocationInput, setBatchPickupLocationInput] = useState(
+    batchConfig?.pickupLocations?.[0] || 'Konter Kampus AJCUlicious'
   );
   const [batchIsOpenInput, setBatchIsOpenInput] = useState(
-    batchConfig?.isOpen ?? true
+    batchConfig?.manualIsOpen ?? batchConfig?.isOpen ?? true
   );
   const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [adminNowMs, setAdminNowMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setAdminNowMs(Date.now()), 0);
+    const id = setInterval(() => setAdminNowMs(Date.now()), 30000);
+    return () => {
+      clearTimeout(t);
+      clearInterval(id);
+    };
+  }, []);
+
+  useBodyScrollLock(Boolean(selectedOrderInfo || showProductModal));
 
   const onUpdateProductsRef = useRef(onUpdateProducts);
   useEffect(() => {
@@ -237,6 +268,13 @@ export default function AdminDashboardView({
       if (allDbProducts && allDbProducts.length > 0) {
         onUpdateProductsRef.current(allDbProducts);
       }
+
+      try {
+        const savedWa = localStorage.getItem('ajc_sent_ready_wa_ids');
+        if (savedWa) {
+          setSentReadyWaIds(JSON.parse(savedWa));
+        }
+      } catch {}
     } finally {
       setIsLoadingData(false);
     }
@@ -293,6 +331,13 @@ export default function AdminDashboardView({
     setSendingWaId(null);
 
     if (res.success && res.data) {
+      setSentReadyWaIds((prev) => {
+        const next = { ...prev, [order.id]: true };
+        try {
+          localStorage.setItem('ajc_sent_ready_wa_ids', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
       showToast(
         `Pesan WA Pesanan Siap berhasil dikirim langsung ke ${res.data.phone} via Fonnte`
       );
@@ -394,27 +439,74 @@ export default function AdminDashboardView({
 
   const handleSaveBatchSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    const openIso = witaDateTimeLocalToIso(batchOpenAtInput);
+    const closeIso = witaDateTimeLocalToIso(batchCloseAtInput);
+
+    if (!openIso || !closeIso) {
+      showToast('Tanggal & jam buka/tutup PO wajib diisi.');
+      return;
+    }
+
+    if (Date.parse(closeIso) <= Date.parse(openIso)) {
+      showToast('Tanggal & jam tutup PO harus lebih akhir dari waktu buka PO.');
+      return;
+    }
+
+    const formattedDeadline = formatWitaDateTimeDisplay(batchCloseAtInput);
+    const formattedPickupDate = formatWitaDateOnlyDisplay(
+      batchPickupDateIsoInput
+    );
+    const formattedPickupTime = formatPickupTimeRange(
+      batchPickupStartTimeInput,
+      batchPickupEndTimeInput
+    );
+    const cleanLocation =
+      batchPickupLocationInput.trim() || 'Konter Kampus AJCUlicious';
+
     setIsSavingBatch(true);
     const res = await updateBatchSettingsInDb({
       batchName: batchNameInput,
       isOpen: batchIsOpenInput,
-      orderDeadline: batchDeadlineInput,
-      readyPickupDate: batchPickupDateInput,
-      readyPickupTime: batchPickupTimeInput,
+      orderOpenAt: openIso,
+      orderCloseAt: closeIso,
+      orderDeadline: formattedDeadline,
+      pickupDateIso: batchPickupDateIsoInput,
+      pickupStartTime: batchPickupStartTimeInput,
+      pickupEndTime: batchPickupEndTimeInput,
+      readyPickupDate: formattedPickupDate,
+      readyPickupTime: formattedPickupTime,
+      pickupLocation: cleanLocation,
     });
     setIsSavingBatch(false);
     if (res.success) {
+      const liveEval = evaluateBatchOpenStatus(
+        {
+          isOpen: batchIsOpenInput,
+          orderOpenAt: openIso,
+          orderCloseAt: closeIso,
+        },
+        Date.now()
+      );
       if (onUpdateBatchConfig && batchConfig) {
         onUpdateBatchConfig({
           ...batchConfig,
           batchName: batchNameInput,
-          isOpen: batchIsOpenInput,
-          orderDeadline: batchDeadlineInput,
-          readyPickupDate: batchPickupDateInput,
-          readyPickupTime: batchPickupTimeInput,
+          isOpen: liveEval.effectiveIsOpen,
+          manualIsOpen: batchIsOpenInput,
+          orderOpenAt: openIso,
+          orderCloseAt: closeIso,
+          orderDeadline: formattedDeadline,
+          pickupDateIso: batchPickupDateIsoInput,
+          pickupStartTime: batchPickupStartTimeInput,
+          pickupEndTime: batchPickupEndTimeInput,
+          readyPickupDate: formattedPickupDate,
+          readyPickupTime: formattedPickupTime,
+          pickupLocations: [cleanLocation],
         });
       }
-      showToast('Jadwal Pre-Order & Jam Pengambilan berhasil diperbarui!');
+      showToast(
+        `Jadwal PO tersimpan! Status saat ini: ${liveEval.statusLabel}`
+      );
     } else {
       showToast(res.error || 'Gagal menyimpan jadwal Pre-Order.');
     }
@@ -603,8 +695,8 @@ export default function AdminDashboardView({
       )}
 
       {/* Top Admin Header */}
-      <header className="sticky top-0 z-40 bg-white border-b border-[#EADFD3] px-4 sm:px-8 py-3.5 shadow-2xs">
-        <div className="w-full max-w-[1600px] mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+      <header className="sticky top-0 z-40 bg-white border-b border-[#EADFD3] px-4 sm:px-6 lg:px-8 py-3.5 shadow-2xs">
+        <div className="w-full flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-white border border-[#EADFD3] overflow-hidden flex items-center justify-center shrink-0">
               <img
@@ -673,7 +765,7 @@ export default function AdminDashboardView({
         </div>
       </header>
 
-      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-8 pt-6 space-y-6">
+      <main className="w-full min-w-0 px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
         {/* ================= 4 KARTU KPI RINGKASAN PENJUALAN ================= */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           <div className="bg-white border border-[#EADFD3] rounded-2xl p-4 space-y-1">
@@ -1053,6 +1145,15 @@ export default function AdminDashboardView({
                               ? `TF (${order.bank_info || 'Bank'})`
                               : order.payment_method}
                           </span>
+                          <span
+                            className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
+                              isPaid
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                            }`}
+                          >
+                            {isPaid ? 'Sudah Bayar' : 'Belum Bayar'}
+                          </span>
                           {getStatusBadge(order.status)}
                         </div>
 
@@ -1088,59 +1189,52 @@ export default function AdminDashboardView({
                         </div>
                       </div>
 
-                      {/* Sisi Kanan: Tersusun 2 Baris Rapi (Tidak Menumpuk Memanjang ke Samping) */}
-                      <div className="flex flex-col sm:items-end gap-2 w-full lg:w-auto border-t lg:border-t-0 pt-3 lg:pt-0 border-[#F4ECE1] shrink-0">
-                        {/* Baris 1: Status Bayar + Tombol Info/Bukti */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          {(order.payment_proof_url ||
-                            order.payment_method === 'TRANSFER' ||
-                            order.payment_method === 'QRIS') && (
+                      {/* Sisi Kanan: 1 Baris Icon-Only Sejajar Horizontal + Popup Tooltip Hover (Tombol Hilang Saat Sudah Selesai) */}
+                      <div className="flex items-center flex-nowrap gap-1.5 w-full lg:w-auto justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-[#F4ECE1] shrink-0">
+                        {(order.payment_proof_url ||
+                          order.payment_method === 'TRANSFER' ||
+                          order.payment_method === 'QRIS') && (
+                          <div className="relative group">
                             <button
                               type="button"
                               onClick={() => {
                                 setSelectedOrderInfo(order);
                                 setProofModalTab('proof');
                               }}
-                              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition border ${
+                              aria-label="Lihat bukti pembayaran TF / QRIS"
+                              className={`w-8 h-8 rounded-xl border flex items-center justify-center transition ${
                                 order.payment_proof_url
-                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
                                   : 'bg-stone-50 hover:bg-stone-100 text-stone-600 border-stone-200'
                               }`}
                             >
-                              Lihat Bukti TF
+                              <ImageIcon className="w-4 h-4" />
                             </button>
-                          )}
+                            <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                              Lihat bukti pembayaran TF / QRIS
+                            </span>
+                          </div>
+                        )}
 
+                        <div className="relative group">
                           <button
                             type="button"
                             onClick={() => {
                               setSelectedOrderInfo(order);
                               setProofModalTab('info');
                             }}
-                            className="px-3 py-1.5 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] text-[11px] font-bold transition"
+                            aria-label="Lihat detail pelanggan"
+                            className="w-8 h-8 rounded-xl border border-[#EADFD3] bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#5C3A21] flex items-center justify-center transition"
                           >
-                            Data Pelanggan
+                            <User className="w-4 h-4" />
                           </button>
+                          <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                            Lihat info lengkap pelanggan
+                          </span>
+                        </div>
 
-                          <div className="inline-flex items-center rounded-xl p-0.5 bg-[#FAF6F0] border border-[#EADFD3]">
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() =>
-                                handlePaymentStatusChange(
-                                  order.id,
-                                  order.invoice_code,
-                                  'BELUM_BAYAR'
-                                )
-                              }
-                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                !isPaid
-                                  ? 'bg-rose-600 text-white'
-                                  : 'text-[#8C6D53] hover:text-[#3B2618]'
-                              }`}
-                            >
-                              Belum Bayar
-                            </button>
+                        {!isPaid && order.status !== 'BATAL' && (
+                          <div className="relative group">
                             <button
                               type="button"
                               disabled={isBusy}
@@ -1151,32 +1245,42 @@ export default function AdminDashboardView({
                                   'SUDAH_BAYAR'
                                 )
                               }
-                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                                isPaid
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'text-[#8C6D53] hover:text-[#3B2618]'
-                              }`}
+                              aria-label="Tandai sudah bayar"
+                              className="w-8 h-8 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 flex items-center justify-center transition disabled:opacity-50"
                             >
-                              Sudah Bayar
+                              <Wallet className="w-4 h-4" />
                             </button>
+                            <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                              Tandai sudah bayar (Lunas)
+                            </span>
                           </div>
-                        </div>
+                        )}
 
-                        {/* Baris 2: Kirim WA Langsung (Fonnte) + Aksi Status Pesanan */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            disabled={isSendingWa}
-                            onClick={() => handleSendDirectFonnteWa(order)}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition disabled:opacity-60"
-                            title="Kirim pesan WA Pesanan Siap secara otomatis lewat Fonnte"
-                          >
-                            {isSendingWa
-                              ? 'Mengirim WA...'
-                              : 'Kirim WA Pesanan Siap'}
-                          </button>
+                        {!sentReadyWaIds[order.id] &&
+                          order.status !== 'SELESAI' &&
+                          order.status !== 'BATAL' && (
+                            <div className="relative group">
+                              <button
+                                type="button"
+                                disabled={isSendingWa}
+                                onClick={() => handleSendDirectFonnteWa(order)}
+                                aria-label="Kirim chat WhatsApp pesanan siap"
+                                className="w-8 h-8 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center transition disabled:opacity-60"
+                              >
+                                {isSendingWa ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <MessageCircle className="w-4 h-4" />
+                                )}
+                              </button>
+                              <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                                Kirim chat customer: pesanan sudah siap
+                              </span>
+                            </div>
+                          )}
 
-                          {order.status === 'PENDING' && (
+                        {order.status === 'PENDING' && (
+                          <div className="relative group">
                             <button
                               type="button"
                               disabled={isBusy}
@@ -1187,14 +1291,20 @@ export default function AdminDashboardView({
                                   'SIAP_DIAMBIL'
                                 )
                               }
-                              className="px-3 py-1.5 rounded-xl bg-[#5C3A21] hover:bg-[#462B18] text-white text-[11px] font-bold transition disabled:opacity-50"
+                              aria-label="Tandai siap diambil"
+                              className="w-8 h-8 rounded-xl bg-[#5C3A21] hover:bg-[#462B18] text-white flex items-center justify-center transition disabled:opacity-50"
                             >
-                              Siap Diambil
+                              <Sparkles className="w-4 h-4" />
                             </button>
-                          )}
+                            <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                              Tandai pesanan siap diambil
+                            </span>
+                          </div>
+                        )}
 
-                          {(order.status === 'PENDING' ||
-                            order.status === 'SIAP_DIAMBIL') && (
+                        {(order.status === 'PENDING' ||
+                          order.status === 'SIAP_DIAMBIL') && (
+                          <div className="relative group">
                             <button
                               type="button"
                               disabled={isBusy}
@@ -1205,14 +1315,20 @@ export default function AdminDashboardView({
                                   'SELESAI'
                                 )
                               }
-                              className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-900 text-white text-[11px] font-bold transition disabled:opacity-50"
+                              aria-label="Tandai selesai"
+                              className="w-8 h-8 rounded-xl bg-stone-800 hover:bg-stone-900 text-white flex items-center justify-center transition disabled:opacity-50"
                             >
-                              Selesai
+                              <CheckCircle2 className="w-4 h-4" />
                             </button>
-                          )}
+                            <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                              Tandai pesanan selesai diambil
+                            </span>
+                          </div>
+                        )}
 
-                          {order.status !== 'BATAL' &&
-                            order.status !== 'SELESAI' && (
+                        {order.status !== 'BATAL' &&
+                          order.status !== 'SELESAI' && (
+                            <div className="relative group">
                               <button
                                 type="button"
                                 disabled={isBusy}
@@ -1223,12 +1339,16 @@ export default function AdminDashboardView({
                                     'BATAL'
                                   )
                                 }
-                                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold transition disabled:opacity-50"
+                                aria-label="Batalkan pesanan"
+                                className="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center transition disabled:opacity-50"
                               >
-                                Batalkan
+                                <Ban className="w-4 h-4" />
                               </button>
-                            )}
-                        </div>
+                              <span className="pointer-events-none opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 absolute bottom-full right-0 mb-1.5 z-30 px-2.5 py-1 rounded-lg bg-[#3B2618] text-white text-[10px] font-semibold whitespace-nowrap shadow-lg">
+                                Batalkan pesanan ini
+                              </span>
+                            </div>
+                          )}
                       </div>
                     </div>
                   );
@@ -1244,10 +1364,10 @@ export default function AdminDashboardView({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-[#EADFD3]">
               <div>
                 <h3 className="font-bold text-sm text-[#3B2618]">
-                  Daftar Menu Pre-Order &amp; Komposisi Bahan
+                  Daftar Menu Pre-Order
                 </h3>
                 <p className="text-xs text-[#8C6D53]">
-                  Tambah produk baru, atur komposisi bahan utama, atau buka/tutup ketersediaan menu PO.
+                  Tambah produk baru, ubah detail menu, atau buka/tutup ketersediaan menu PO.
                 </p>
               </div>
 
@@ -1308,17 +1428,6 @@ export default function AdminDashboardView({
                       >
                         {prod.isActive ? 'PO Dibuka' : 'Ditutup'}
                       </button>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1">
-                      {(prod.ingredients ?? []).map((ing, i) => (
-                        <span
-                          key={i}
-                          className="text-[10px] px-2 py-0.5 rounded-md bg-[#FAF6F0] border border-[#EADFD3] text-[#5C3A21] font-mono"
-                        >
-                          {ing}
-                        </span>
-                      ))}
                     </div>
 
                     <div className="pt-2.5 border-t border-[#F4ECE1] flex items-center justify-between">
@@ -1387,6 +1496,29 @@ export default function AdminDashboardView({
                 onSubmit={handleSaveBatchSettings}
                 className="space-y-3 text-xs"
               >
+                {(() => {
+                  const previewEval = evaluateBatchOpenStatus(
+                    {
+                      isOpen: batchIsOpenInput,
+                      orderOpenAt: witaDateTimeLocalToIso(batchOpenAtInput),
+                      orderCloseAt: witaDateTimeLocalToIso(batchCloseAtInput),
+                    },
+                    adminNowMs ?? undefined
+                  );
+                  return (
+                    <div
+                      className={`p-2.5 rounded-xl border text-[11px] font-semibold flex items-center justify-between gap-2 ${
+                        previewEval.effectiveIsOpen
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-rose-50 border-rose-200 text-rose-800'
+                      }`}
+                    >
+                      <span>Status Otomatis Saat Ini:</span>
+                      <span className="font-bold">{previewEval.statusLabel}</span>
+                    </div>
+                  );
+                })()}
+
                 <div>
                   <label className="block font-semibold text-[#3B2618] mb-1">
                     Nama Batch Pre-Order
@@ -1400,29 +1532,45 @@ export default function AdminDashboardView({
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-[#3B2618] mb-1">
-                    Batas Waktu Pemesanan
-                  </label>
-                  <input
-                    type="text"
-                    value={batchDeadlineInput}
-                    onChange={(e) => setBatchDeadlineInput(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
-                    required
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Mulai Buka Order (WITA)
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={batchOpenAtInput}
+                      onChange={(e) => setBatchOpenAtInput(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Batas Tutup Order (WITA)
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={batchCloseAtInput}
+                      onChange={(e) => setBatchCloseAtInput(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                      required
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block font-semibold text-[#3B2618] mb-1">
                       Tanggal Pengambilan
                     </label>
                     <input
-                      type="text"
-                      value={batchPickupDateInput}
-                      onChange={(e) => setBatchPickupDateInput(e.target.value)}
-                      placeholder="Contoh: Jumat, 20 Nov 2026"
+                      type="date"
+                      value={batchPickupDateIsoInput}
+                      onChange={(e) =>
+                        setBatchPickupDateIsoInput(e.target.value)
+                      }
                       className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
                       required
                     />
@@ -1430,17 +1578,49 @@ export default function AdminDashboardView({
 
                   <div>
                     <label className="block font-semibold text-[#3B2618] mb-1">
-                      Jam Pengambilan
+                      Jam Mulai Ambil
                     </label>
                     <input
-                      type="text"
-                      value={batchPickupTimeInput}
-                      onChange={(e) => setBatchPickupTimeInput(e.target.value)}
-                      placeholder="Contoh: 13:00 - 17:00 WITA"
+                      type="time"
+                      value={batchPickupStartTimeInput}
+                      onChange={(e) =>
+                        setBatchPickupStartTimeInput(e.target.value)
+                      }
                       className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
                       required
                     />
                   </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Jam Selesai Ambil
+                    </label>
+                    <input
+                      type="time"
+                      value={batchPickupEndTimeInput}
+                      onChange={(e) =>
+                        setBatchPickupEndTimeInput(e.target.value)
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#3B2618] mb-1">
+                    Tempat / Lokasi Pengambilan
+                  </label>
+                  <input
+                    type="text"
+                    value={batchPickupLocationInput}
+                    onChange={(e) =>
+                      setBatchPickupLocationInput(e.target.value)
+                    }
+                    placeholder="Contoh: Konter Kampus / Lobi Gedung A"
+                    className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                    required
+                  />
                 </div>
 
                 <div className="flex items-center justify-between pt-1">
@@ -1452,7 +1632,7 @@ export default function AdminDashboardView({
                       className="rounded accent-[#5C3A21]"
                     />
                     <span className="font-semibold text-[#3B2618]">
-                      Buka Penerimaan Pre-Order
+                      Aktifkan Penerimaan Pre-Order Sesuai Jadwal
                     </span>
                   </label>
 
@@ -1931,7 +2111,7 @@ export default function AdminDashboardView({
 
       {/* ================= MODAL INFO DATA PELANGGAN & LIHAT BUKTI TF / QRIS ================= */}
       {selectedOrderInfo && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 !m-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-[#EADFD3] pb-3">
               <div>
@@ -2189,11 +2369,11 @@ export default function AdminDashboardView({
 
       {/* Modal Tambah / Edit Produk & Komposisi Bahan */}
       {showProductModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-[#EADFD3] rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-extrabold text-base text-[#3B2618]">
-                {editingProductId ? 'Edit Menu & Komposisi' : 'Tambah Menu Baru'}
+                {editingProductId ? 'Edit Detail Menu' : 'Tambah Menu Baru'}
               </h3>
               <button
                 type="button"
@@ -2255,20 +2435,6 @@ export default function AdminDashboardView({
                   step={1000}
                   value={menuPrice}
                   onChange={(e) => setMenuPrice(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">
-                  Komposisi Bahan Utama (pisahkan dengan koma) *
-                </label>
-                <input
-                  type="text"
-                  value={menuIngredients}
-                  onChange={(e) => setMenuIngredients(e.target.value)}
-                  placeholder="Belgian Dark Choco, Pistachio Cream, Kunafa Pastry, Anchor Butter"
                   className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
                   required
                 />

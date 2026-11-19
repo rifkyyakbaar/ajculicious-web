@@ -18,6 +18,7 @@ import {
 import { OrderRecord, OrderStatus, ReviewRecord } from '../types/ajculicious';
 import { OFFICIAL_INFO } from '../data/initial_data';
 import { formatRupiah } from '../utils/formatters';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 interface OrderTrackerModalProps {
   isOpen: boolean;
@@ -48,6 +49,8 @@ export default function OrderTrackerModal({
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSuccess, setReviewSuccess] = useState(false);
+
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
@@ -153,7 +156,7 @@ export default function OrderTrackerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+    <div className="fixed inset-0 !m-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
       <div className="bg-[#FFFDF9] border border-[#E6D8C7] rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Modal Header */}
         <div className="px-5 py-4 bg-[#FAF6F0] border-b border-[#E6D8C7] flex items-center justify-between">

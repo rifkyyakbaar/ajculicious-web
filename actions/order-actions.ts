@@ -18,6 +18,7 @@ import {
   verifyWhatsAppNumberViaFonnte,
   sendFonnteWhatsAppMessage,
 } from '../lib/fonnte';
+import { evaluateBatchOpenStatus } from '../utils/batchSchedule';
 
 /**
  * Server Action: createOrder (Hybrid Checkout)
@@ -39,6 +40,30 @@ export async function createOrder(
   input: CreateOrderInput
 ): Promise<ActionResponse<CreateOrderSuccessData>> {
   try {
+    const supabasePreCheck = createSupabaseServerClient();
+    const { data: batchStatus } = await supabasePreCheck
+      .from('batch_settings')
+      .select('is_open, order_open_at, order_close_at')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (batchStatus) {
+      const evalSchedule = evaluateBatchOpenStatus(
+        {
+          isOpen: batchStatus.is_open,
+          orderOpenAt: batchStatus.order_open_at,
+          orderCloseAt: batchStatus.order_close_at,
+        },
+        Date.now()
+      );
+      if (!evalSchedule.effectiveIsOpen) {
+        return {
+          success: false,
+          error: `${evalSchedule.statusLabel}. Pesanan baru belum dapat diterima.`,
+        };
+      }
+    }
+
     // 1. Validasi Input Dasar & Anti-Pengguna Iseng
     const customerName = (input?.customer_name ?? '').trim();
     if (!customerName || customerName.length < 2) {
@@ -265,7 +290,7 @@ export async function createOrder(
     // 4. Kirim Notifikasi Struk & Jadwal Pengambilan Otomatis ke WA Pembeli via Fonnte
     const { data: batchRow } = await supabase
       .from('batch_settings')
-      .select('ready_pickup_date, ready_pickup_time')
+      .select('ready_pickup_date, ready_pickup_time, pickup_location')
       .eq('id', 1)
       .single();
 
@@ -273,6 +298,8 @@ export async function createOrder(
       batchRow?.ready_pickup_date || 'Jumat, 20 Nov 2026';
     const pickupTimeStr =
       batchRow?.ready_pickup_time || '13:00 - 17:00 WITA';
+    const pickupLocationStr =
+      batchRow?.pickup_location?.trim() || 'Konter Kampus AJCUlicious';
 
     const customerReceiptWaText = [
       `Halo ${createdOrder.customer_name},`,
@@ -286,7 +313,7 @@ export async function createOrder(
       ``,
       `Tanggal Pengambilan: ${pickupDateStr}`,
       `Jam Pengambilan: ${pickupTimeStr}`,
-      `Lokasi Ambil: Konter Kampus AJCUlicious`,
+      `Lokasi Ambil: ${pickupLocationStr}`,
       ``,
       `Simpan kode invoice #${createdOrder.invoice_code} ini untuk ditunjukkan saat pengambilan pesanan. Terima kasih.`,
     ].join('\n');
@@ -328,18 +355,21 @@ export async function createOrder(
 /**
  * Server Action: getOrderByInvoice (Lacak Pesanan Publik)
  * ----------------------------------------------------------------------------
- * Mencari pesanan berdasarkan `invoice_code` (contoh: AJC-261117-001)
- * atau `customer_name` tanpa mengekspos data sensitif.
+ * Mencari pesanan hanya berdasarkan kecocokan persis (exact match) Kode Invoice
+ * lengkap (contoh: AJCU-7K4M9P) agar data pesanan pelanggan lain tetap terjaga privasinya.
  */
 export async function getOrderByInvoice(
   searchQuery: string
 ): Promise<ActionResponse<OrderWithItems[]>> {
   try {
-    const cleanQuery = (searchQuery ?? '').trim().replace(/^#/, '');
-    if (!cleanQuery || cleanQuery.length < 2) {
+    const cleanCode = (searchQuery ?? '')
+      .trim()
+      .replace(/^#/, '')
+      .toUpperCase();
+    if (!cleanCode || cleanCode.length < 6) {
       return {
         success: false,
-        error: 'Masukkan Kode Invoice, Nama, atau No. WA Pemesan (minimal 2 karakter).',
+        error: 'Masukkan Kode Invoice lengkap Anda (contoh: AJCU-7K4M9P).',
       };
     }
 
@@ -372,11 +402,8 @@ export async function getOrderByInvoice(
         )
       `
       )
-      .or(
-        `invoice_code.ilike.%${cleanQuery}%,customer_name.ilike.%${cleanQuery}%,customer_phone.ilike.%${cleanQuery}%`
-      )
-      .order('created_at', { ascending: false })
-      .limit(10);
+      .eq('invoice_code', cleanCode)
+      .limit(1);
 
     if (error) {
       return {
@@ -496,7 +523,7 @@ export async function updateOrderCustomerPhone(
 
     const { data: batchRow } = await supabase
       .from('batch_settings')
-      .select('ready_pickup_date, ready_pickup_time')
+      .select('ready_pickup_date, ready_pickup_time, pickup_location')
       .eq('id', 1)
       .single();
 
@@ -507,6 +534,7 @@ export async function updateOrderCustomerPhone(
       )}) telah diperbarui.`,
       `Tanggal Ambil: ${batchRow?.ready_pickup_date || 'Jumat, 20 Nov 2026'}`,
       `Jam Ambil: ${batchRow?.ready_pickup_time || '13:00 - 17:00 WITA'}`,
+      `Lokasi Ambil: ${batchRow?.pickup_location?.trim() || 'Konter Kampus AJCUlicious'}`,
     ].join('\n');
 
     const sendRes = await sendFonnteWhatsAppMessage(phoneCheck.normalized, msg);
@@ -594,19 +622,131 @@ export async function getOrdersByInvoiceList(
 }
 
 /**
+ * Server Action: verifyInvoiceForReview
+ * ----------------------------------------------------------------------------
+ * Memvalidasi kode invoice sebelum pelanggan mengisi ulasan dan memastikan
+ * 1 kode invoice hanya bisa dipakai untuk 1 ulasan.
+ */
+export async function verifyInvoiceForReview(invoiceCode: string): Promise<
+  ActionResponse<{
+    invoiceCode: string;
+    customerName: string;
+    menuOrdered: string;
+    totalPrice: number;
+    createdAt: string;
+    items: Array<{ productName: string; quantity: number }>;
+  }>
+> {
+  try {
+    const cleanInvoice = (invoiceCode ?? '')
+      .trim()
+      .replace(/^#/, '')
+      .toUpperCase();
+
+    if (!cleanInvoice || cleanInvoice.length < 6) {
+      return {
+        success: false,
+        error: 'Masukkan kode invoice lengkap Anda (contoh: AJCU-7K4M9P).',
+      };
+    }
+
+    const supabase = createSupabaseServerClient();
+
+    const { data: orderRow, error: orderErr } = await supabase
+      .from('orders')
+      .select(
+        `
+        id,
+        invoice_code,
+        customer_name,
+        total_price,
+        created_at,
+        status,
+        order_items (
+          product_name_snapshot,
+          quantity
+        )
+      `
+      )
+      .eq('invoice_code', cleanInvoice)
+      .maybeSingle();
+
+    if (orderErr || !orderRow) {
+      return {
+        success: false,
+        error: `Kode invoice #${cleanInvoice} tidak ditemukan. Periksa kembali kode pada struk pesanan Anda.`,
+      };
+    }
+
+    if (orderRow.status === 'BATAL') {
+      return {
+        success: false,
+        error: 'Pesanan yang dibatalkan tidak dapat diberikan ulasan.',
+      };
+    }
+
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('id')
+      .ilike('invoice_code', cleanInvoice)
+      .maybeSingle();
+
+    if (existingReview) {
+      return {
+        success: false,
+        error: `Kode invoice #${cleanInvoice} sudah pernah digunakan untuk memberikan ulasan (1 invoice hanya 1 ulasan).`,
+      };
+    }
+
+    const items = (orderRow.order_items ?? []) as Array<{
+      product_name_snapshot: string;
+      quantity: number;
+    }>;
+    const menuSummary =
+      items.map((i) => i.product_name_snapshot).join(', ') || 'Menu AJCUlicious';
+
+    return {
+      success: true,
+      data: {
+        invoiceCode: orderRow.invoice_code,
+        customerName: orderRow.customer_name,
+        menuOrdered: menuSummary,
+        totalPrice: orderRow.total_price,
+        createdAt: orderRow.created_at,
+        items: items.map((i) => ({
+          productName: i.product_name_snapshot,
+          quantity: i.quantity,
+        })),
+      },
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error:
+        err instanceof Error ? err.message : 'Gagal memverifikasi kode invoice.',
+    };
+  }
+}
+
+const MAX_REVIEW_COMMENT_LENGTH = 180;
+
+/**
  * Server Action: submitCustomerReview
  * ----------------------------------------------------------------------------
- * Menyimpan ulasan pelanggan baru langsung ke tabel `public.reviews` di Supabase.
+ * Menyimpan ulasan pelanggan baru langsung ke tabel `public.reviews` di Supabase
+ * dengan verifikasi wajib kode invoice (1 kode invoice = 1 ulasan).
  */
 export async function submitCustomerReview(input: {
-  customerName: string;
+  invoiceCode?: string;
+  customerName?: string;
   faculty?: string;
   rating: number;
-  menuOrdered: string;
+  menuOrdered?: string;
   comment: string;
 }): Promise<
   ActionResponse<{
     id: string;
+    invoiceCode?: string;
     customerName: string;
     faculty: string;
     rating: number;
@@ -617,23 +757,98 @@ export async function submitCustomerReview(input: {
   }>
 > {
   try {
+    const cleanInvoice = (input.invoiceCode ?? '')
+      .trim()
+      .replace(/^#/, '')
+      .toUpperCase();
     const cleanName = (input.customerName ?? '').trim();
     const cleanComment = (input.comment ?? '').trim();
-    if (!cleanName || !cleanComment) {
+
+    if (!cleanInvoice || cleanInvoice.length < 6) {
       return {
         success: false,
-        error: 'Nama dan isi ulasan wajib diisi.',
+        error: 'Kode invoice pesanan wajib diisi untuk memberikan ulasan.',
+      };
+    }
+
+    if (!cleanComment) {
+      return {
+        success: false,
+        error: 'Isi ulasan wajib diisi.',
+      };
+    }
+
+    if (cleanComment.length > MAX_REVIEW_COMMENT_LENGTH) {
+      return {
+        success: false,
+        error: `Ulasan maksimal ${MAX_REVIEW_COMMENT_LENGTH} karakter.`,
       };
     }
 
     const supabase = createSupabaseServerClient();
+
+    // 1. Validasi kode invoice terdaftar & tidak dibatalkan
+    const { data: orderRow, error: orderErr } = await supabase
+      .from('orders')
+      .select(
+        `
+        id,
+        invoice_code,
+        customer_name,
+        status,
+        order_items (
+          product_name_snapshot
+        )
+      `
+      )
+      .eq('invoice_code', cleanInvoice)
+      .maybeSingle();
+
+    if (orderErr || !orderRow) {
+      return {
+        success: false,
+        error: `Kode invoice #${cleanInvoice} tidak valid atau belum terdaftar.`,
+      };
+    }
+
+    if (orderRow.status === 'BATAL') {
+      return {
+        success: false,
+        error: 'Pesanan yang dibatalkan tidak dapat diberikan ulasan.',
+      };
+    }
+
+    // 2. Pastikan 1 kode invoice hanya bisa membuat 1 ulasan
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('id')
+      .ilike('invoice_code', cleanInvoice)
+      .maybeSingle();
+
+    if (existingReview) {
+      return {
+        success: false,
+        error: `Kode invoice #${cleanInvoice} sudah pernah digunakan untuk memberikan ulasan.`,
+      };
+    }
+
+    const orderedMenus = ((orderRow.order_items ?? []) as Array<{
+      product_name_snapshot: string;
+    }>)
+      .map((i) => i.product_name_snapshot)
+      .join(', ');
+
     const { data, error } = await supabase
       .from('reviews')
       .insert({
-        customer_name: cleanName,
-        faculty: (input.faculty ?? '').trim() || 'Pelanggan',
+        invoice_code: orderRow.invoice_code,
+        customer_name: orderRow.customer_name || cleanName,
+        faculty: (input.faculty ?? '').trim() || 'Pembeli Terverifikasi',
         rating: Math.min(5, Math.max(1, Math.round(input.rating || 5))),
-        menu_ordered: (input.menuOrdered ?? '').trim() || 'Menu AJCUlicious',
+        menu_ordered:
+          orderedMenus ||
+          (input.menuOrdered ?? '').trim() ||
+          'Menu AJCUlicious',
         comment: cleanComment,
         is_approved: true,
       })
@@ -641,6 +856,12 @@ export async function submitCustomerReview(input: {
       .single();
 
     if (error || !data) {
+      if (error?.code === '23505') {
+        return {
+          success: false,
+          error: `Kode invoice #${cleanInvoice} sudah pernah digunakan untuk memberikan ulasan.`,
+        };
+      }
       return {
         success: false,
         error: error?.message || 'Gagal menyimpan ulasan ke database.',
@@ -653,6 +874,7 @@ export async function submitCustomerReview(input: {
       success: true,
       data: {
         id: data.id,
+        invoiceCode: data.invoice_code || orderRow.invoice_code,
         customerName: data.customer_name,
         faculty: data.faculty,
         rating: data.rating,

@@ -1,25 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   Plus,
   Minus,
   Search,
   X,
-  Sparkles,
-  Flame,
-  Cookie,
-  Droplets,
-  Wheat,
-  Milk,
-  Nut,
-  ShoppingBag,
-  SlidersHorizontal,
-  Check,
-  Wand2,
 } from 'lucide-react';
 import { Product, CategorySlug, CartItem } from '../types/ajculicious';
 import { formatRupiah } from '../utils/formatters';
+import { useBodyScrollLock } from '../utils/useBodyScrollLock';
 
 interface ProductCatalogProps {
   products: Product[];
@@ -28,6 +18,8 @@ interface ProductCatalogProps {
   cart: CartItem[];
   onAddToCart: (product: Product) => void;
   onUpdateQuantity: (productId: string, delta: number) => void;
+  isOrderOpen?: boolean;
+  onBlockedByClosedPO?: () => void;
   isTourHighlighted?: boolean;
   isSwarmRebuilding?: boolean;
   onTriggerSwarmRebuild?: () => void;
@@ -56,52 +48,6 @@ const BROWNIES_SALT_OPTIONS = [
   { id: 'Extra Salt', shortLabel: 'Extra', label: 'Extra Salt', desc: 'Extra Sea Salt' },
 ] as const;
 
-// Helper ikon visual untuk kotak komposisi bahan
-function getIngredientIcon(ingredientName: string) {
-  const lower = ingredientName.toLowerCase();
-  if (lower.includes('choco') || lower.includes('cocoa') || lower.includes('cokelat')) {
-    return <Cookie className="w-5 h-5 text-[#5C3A21]" />;
-  }
-  if (
-    lower.includes('pistachio') ||
-    lower.includes('almond') ||
-    lower.includes('nut') ||
-    lower.includes('wijen')
-  ) {
-    return <Nut className="w-5 h-5 text-[#5C3A21]" />;
-  }
-  if (
-    lower.includes('butter') ||
-    lower.includes('cream') ||
-    lower.includes('milk') ||
-    lower.includes('cheese') ||
-    lower.includes('mascarpone')
-  ) {
-    return <Milk className="w-5 h-5 text-[#5C3A21]" />;
-  }
-  if (
-    lower.includes('chili') ||
-    lower.includes('mentai') ||
-    lower.includes('torch') ||
-    lower.includes('oil')
-  ) {
-    return <Flame className="w-5 h-5 text-[#5C3A21]" />;
-  }
-  if (
-    lower.includes('flour') ||
-    lower.includes('kunafa') ||
-    lower.includes('sponge') ||
-    lower.includes('crumb') ||
-    lower.includes('kulit')
-  ) {
-    return <Wheat className="w-5 h-5 text-[#5C3A21]" />;
-  }
-  if (lower.includes('sugar') || lower.includes('spread') || lower.includes('vanilla')) {
-    return <Droplets className="w-5 h-5 text-[#5C3A21]" />;
-  }
-  return <Sparkles className="w-5 h-5 text-[#5C3A21]" />;
-}
-
 function isMainBrowniesProduct(product: Product): boolean {
   const slug = product.slug.toLowerCase();
   const name = product.name.toLowerCase();
@@ -125,12 +71,16 @@ export default function ProductCatalog({
   cart,
   onAddToCart,
   onUpdateQuantity,
+  isOrderOpen = true,
+  onBlockedByClosedPO,
   isTourHighlighted = false,
   isSwarmRebuilding = false,
   onTriggerSwarmRebuild,
 }: ProductCatalogProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  useBodyScrollLock(Boolean(selectedProduct));
 
   // State khusus kustomisasi Brownies (150g / 200g + Opsi Bulat Gula & Garam ala Kopi Kenangan)
   const [browniesSize, setBrowniesSize] = useState<'150g' | '200g'>('150g');
@@ -195,9 +145,9 @@ export default function ProductCatalog({
   return (
     <section
       id="katalog-menu"
-      className={`space-y-4 pt-2 scroll-mt-20 transition-all duration-300 ${
+      className={`flex flex-col gap-4 pt-2 min-w-0 scroll-mt-20 transition-all duration-300 ${
         isTourHighlighted
-          ? 'relative z-40 bg-[#FAF6F0] p-4 rounded-3xl ring-4 ring-amber-400 shadow-2xl'
+          ? 'relative z-[58] bg-[#FAF6F0] p-4 rounded-3xl ring-4 ring-amber-400 shadow-2xl'
           : ''
       }`}
     >
@@ -210,7 +160,7 @@ export default function ProductCatalog({
             </h2>
           </div>
           <p className="text-xs text-[#8C6D53]">
-            Klik produk untuk melihat poster katalog, komposisi bahan, &amp; opsi kustomisasi
+            Klik produk untuk melihat detail menu &amp; opsi pesanan
           </p>
         </div>
 
@@ -277,11 +227,14 @@ export default function ProductCatalog({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {filteredProducts.map((product) => {
             const isBrowniesCard = isMainBrowniesProduct(product);
             const inCart = cart.find((c) => c.product.id === product.id);
-            const ingredientsList = product.ingredients ?? [];
+            const isBestSeller = Boolean(
+              product.isBestSeller ||
+                (isBrowniesCard && brownies200Product?.isBestSeller)
+            );
 
             return (
               <article
@@ -293,138 +246,109 @@ export default function ProductCatalog({
                   }
                   setSelectedProduct(product);
                 }}
-                className="bg-white border border-[#EADFD3] rounded-2xl p-4 flex flex-col justify-between hover:border-[#5C3A21]/60 hover:shadow-md transition-all duration-200 cursor-pointer group"
+                className={`rounded-2xl overflow-hidden flex flex-col justify-between transition-all duration-200 cursor-pointer group border ${
+                  isBestSeller
+                    ? 'bg-gradient-to-b from-amber-50/95 via-[#FFFDF8] to-white border-amber-300 ring-1 ring-amber-200/80 hover:border-amber-500 hover:shadow-md'
+                    : 'bg-white border-[#EADFD3] hover:border-[#5C3A21]/60 hover:shadow-md'
+                }`}
               >
-                <div className="flex items-start gap-3.5">
+                {/* Gambar Menu di Atas */}
+                <div className="relative aspect-[4/3] w-full bg-[#FAF6F0] overflow-hidden border-b border-[#F4ECE1]">
                   {product.imageUrl &&
                   product.imageUrl !== '/images/storefront-counter.jpg' ? (
-                    <div className="w-20 h-24 sm:w-24 sm:h-28 rounded-2xl bg-[#FAF6F0] border border-[#EADFD3] overflow-hidden shrink-0 shadow-2xs relative">
-                      <img
-                        src={product.imageUrl}
-                        alt={product.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        loading="lazy"
-                      />
-                    </div>
+                    <img
+                      src={product.imageUrl}
+                      alt={product.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      loading="lazy"
+                    />
                   ) : (
-                    <div className="w-14 h-14 rounded-2xl bg-[#FAF6F0] border border-[#EADFD3] flex items-center justify-center text-3xl shrink-0 group-hover:scale-105 transition-transform">
+                    <div className="w-full h-full flex items-center justify-center text-4xl select-none">
                       {product.emoji}
                     </div>
                   )}
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="font-bold text-sm sm:text-base text-[#3B2618] group-hover:text-[#5C3A21] transition-colors leading-snug">
-                          {isBrowniesCard ? 'Brownies' : product.name}
-                        </h3>
-                        {isBrowniesCard && (
-                          <div className="flex flex-wrap items-center gap-1 mt-1">
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 font-bold border border-amber-200">
-                              Pilihan: 150g (22K) / 200g (28K)
-                            </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FAF6F0] text-[#5C3A21] font-semibold border border-[#EADFD3]">
-                              Custom Gula &amp; Garam
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FAF6F0] text-[#7D5E46] font-medium border border-[#EADFD3] shrink-0">
-                        {product.categoryLabel}
-                      </span>
-                    </div>
+                  {isBestSeller && (
+                    <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full bg-amber-400 text-[#3B2618] text-[10px] font-extrabold shadow-xs border border-amber-200">
+                      Best Seller
+                    </span>
+                  )}
+                </div>
 
-                    <p className="text-xs text-[#7D5E46] mt-1.5 leading-relaxed line-clamp-2">
-                      {isBrowniesCard
-                        ? 'Soft and chewy fudgy brownies panggang dengan shiny crust renyah. Tersedia ukuran 150g & 200g dengan opsi takaran gula dan garam.'
-                        : product.description}
-                    </p>
+                {/* Nama, Harga & Tombol Pesan di Bawah */}
+                <div className="p-3 sm:p-3.5 flex flex-col justify-between flex-1 gap-2.5">
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-xs sm:text-sm text-[#3B2618] group-hover:text-[#5C3A21] transition-colors leading-snug line-clamp-2 min-h-[2.25rem]">
+                      {isBrowniesCard ? 'Brownies' : product.name}
+                    </h3>
 
-                    {ingredientsList.length > 0 && (
-                      <p className="text-[10px] text-[#9C7A5E] font-medium mt-1.5 truncate">
-                        Komposisi: {ingredientsList.join(' + ')}
+                    {isBrowniesCard ? (
+                      <p className="font-extrabold text-sm sm:text-base text-[#5C3A21]">
+                        Rp22.000{' '}
+                        <span className="text-[11px] font-bold text-[#8C6D53]">
+                          - Rp28.000
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="font-extrabold text-sm sm:text-base text-[#5C3A21]">
+                        {formatRupiah(product.price)}
                       </p>
                     )}
                   </div>
-                </div>
 
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  className="mt-3.5 pt-3 border-t border-[#F4ECE1] flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-2">
+                  <div onClick={(e) => e.stopPropagation()}>
                     {isBrowniesCard ? (
-                      <div>
-                        <span className="font-extrabold text-sm sm:text-base text-[#3B2618]">
-                          Rp22.000
+                      <button
+                        type="button"
+                        suppressHydrationWarning
+                        onClick={() => {
+                          setBrowniesSize('150g');
+                          setSelectedProduct(product);
+                        }}
+                        className="w-full py-2 px-3 rounded-xl bg-[#5C3A21] text-white text-xs font-semibold hover:bg-[#462B18] active:scale-95 transition-all"
+                      >
+                        Pilih Opsi
+                        {totalBrowniesInCart > 0
+                          ? ` (${totalBrowniesInCart})`
+                          : ''}
+                      </button>
+                    ) : inCart ? (
+                      <div className="w-full flex items-center justify-between bg-[#FAF6F0] border border-[#E6D8C7] rounded-xl px-2 py-1">
+                        <button
+                          type="button"
+                          suppressHydrationWarning
+                          onClick={() => onUpdateQuantity(product.id, -1)}
+                          className="w-7 h-7 rounded-lg bg-white text-[#5C3A21] flex items-center justify-center hover:bg-[#E6D8C7] transition"
+                          aria-label={`Kurangi ${product.name}`}
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+
+                        <span className="text-xs font-bold text-[#3B2618]">
+                          {inCart.quantity}
                         </span>
-                        <span className="text-xs font-bold text-[#8C6D53]">
-                          {' '}
-                          - Rp28.000
-                        </span>
+
+                        <button
+                          type="button"
+                          suppressHydrationWarning
+                          onClick={() => onUpdateQuantity(product.id, 1)}
+                          className="w-7 h-7 rounded-lg bg-[#5C3A21] text-white flex items-center justify-center hover:bg-[#462B18] transition"
+                          aria-label={`Tambah ${product.name}`}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     ) : (
-                      <span className="font-extrabold text-base text-[#3B2618]">
-                        {formatRupiah(product.price)}
-                      </span>
+                      <button
+                        type="button"
+                        suppressHydrationWarning
+                        onClick={() => onAddToCart(product)}
+                        className="w-full py-2 px-3 rounded-xl bg-[#5C3A21] text-white text-xs font-semibold hover:bg-[#462B18] active:scale-95 transition-all"
+                      >
+                        + Tambah
+                      </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProduct(product)}
-                      className="text-[11px] text-[#7D5E46] hover:text-[#3B2618] underline font-medium"
-                    >
-                      {isBrowniesCard ? 'Pilih Ukuran & Opsi' : 'Lihat Bahan'}
-                    </button>
                   </div>
-
-                  {isBrowniesCard ? (
-                    <button
-                      type="button"
-                      suppressHydrationWarning
-                      onClick={() => setSelectedProduct(product)}
-                      className="px-3.5 py-1.5 rounded-xl bg-[#5C3A21] text-white text-xs font-semibold hover:bg-[#462B18] active:scale-95 transition-all"
-                    >
-                      Pilih Opsi
-                      {totalBrowniesInCart > 0
-                        ? ` (${totalBrowniesInCart})`
-                        : ''}
-                    </button>
-                  ) : inCart ? (
-                    <div className="inline-flex items-center gap-2 bg-[#FAF6F0] border border-[#E6D8C7] rounded-xl px-2 py-1">
-                      <button
-                        type="button"
-                        suppressHydrationWarning
-                        onClick={() => onUpdateQuantity(product.id, -1)}
-                        className="w-6 h-6 rounded-lg bg-white text-[#5C3A21] flex items-center justify-center hover:bg-[#E6D8C7] transition"
-                        aria-label={`Kurangi ${product.name}`}
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-
-                      <span className="text-xs font-bold min-w-[20px] text-center text-[#3B2618]">
-                        {inCart.quantity}
-                      </span>
-
-                      <button
-                        type="button"
-                        suppressHydrationWarning
-                        onClick={() => onUpdateQuantity(product.id, 1)}
-                        className="w-6 h-6 rounded-lg bg-[#5C3A21] text-white flex items-center justify-center hover:bg-[#462B18] transition"
-                        aria-label={`Tambah ${product.name}`}
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      suppressHydrationWarning
-                      onClick={() => onAddToCart(product)}
-                      className="px-3.5 py-1.5 rounded-xl bg-[#5C3A21] text-white text-xs font-semibold hover:bg-[#462B18] active:scale-95 transition-all"
-                    >
-                      + Tambah
-                    </button>
-                  )}
                 </div>
               </article>
             );
@@ -432,100 +356,88 @@ export default function ProductCatalog({
         </div>
       )}
 
-      {/* ================= MODAL DETAIL PRODUK & OPSI KUSTOMISASI BROWNIES (ALA KOPI KENANGAN) ================= */}
+      {/* ================= MODAL DETAIL PRODUK (GAMBAR DI ATAS, DETAIL & PESAN DI BAWAH) ================= */}
       {selectedProduct && (
         <div
           onClick={() => setSelectedProduct(null)}
-          className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
+          className="fixed inset-0 !m-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#FAF6F0] border border-[#D8C2A8] rounded-3xl max-w-4xl w-full max-h-[92vh] overflow-y-auto shadow-2xl grid grid-cols-1 md:grid-cols-12 animate-in zoom-in-95 duration-200"
+            className={`bg-[#FFFDF9] border rounded-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 ${
+              isSelectedBrownies ? 'max-w-lg' : 'max-w-md'
+            } ${
+              selectedProduct.isBestSeller ||
+              (isSelectedBrownies && brownies200Product?.isBestSeller)
+                ? 'border-amber-300'
+                : 'border-[#D8C2A8]'
+            }`}
           >
-            {/* SISI KIRI (5 Kolom): Poster Katalog Besar + Bar Komposisi Bawah */}
-            <div className="md:col-span-5 bg-gradient-to-br from-[#EFE5D8] via-[#E5D5C3] to-[#D8C2A8] p-6 flex flex-col justify-between relative min-h-[280px] sm:min-h-[360px]">
-              {/* Label Kategori Kiri Atas */}
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full bg-white/80 text-[#5C3A21] backdrop-blur-xs">
-                  {selectedProduct.categoryLabel}
-                </span>
+            {/* Gambar di Atas */}
+            <div className="relative bg-gradient-to-br from-[#F4ECE1] via-[#EFE5D8] to-[#E5D5C3] p-5 flex items-center justify-center border-b border-[#EADFD3]">
+              <div className="absolute top-3.5 left-3.5 right-3.5 flex items-center justify-between gap-2 z-10">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-white/90 text-[#5C3A21] border border-[#EADFD3]">
+                    {selectedProduct.categoryLabel}
+                  </span>
+                  {(selectedProduct.isBestSeller ||
+                    (isSelectedBrownies && brownies200Product?.isBestSeller)) && (
+                    <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-amber-400 text-[#3B2618] border border-amber-200 shadow-2xs">
+                      Best Seller
+                    </span>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setSelectedProduct(null)}
-                  className="md:hidden p-2 rounded-full bg-white/80 text-[#3B2618]"
+                  className="p-2 rounded-full bg-white/90 hover:bg-white text-[#3B2618] border border-[#EADFD3] shadow-2xs transition"
+                  aria-label="Tutup detail"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Gambar / Poster Katalog Produk Besar di Tengah */}
-              <div className="my-auto py-4 flex flex-col items-center justify-center">
-                {selectedProduct.imageUrl &&
-                selectedProduct.imageUrl !== '/images/storefront-counter.jpg' ? (
-                  <div className="w-full max-w-[260px] rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-white">
-                    <img
-                      src={selectedProduct.imageUrl}
-                      alt={selectedProduct.name}
-                      className="w-full h-auto object-contain block"
-                    />
-                  </div>
-                ) : (
-                  <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-full bg-[#FFFDF9] border-4 border-white shadow-xl flex items-center justify-center text-7xl sm:text-8xl select-none">
-                    {selectedProduct.emoji}
-                  </div>
-                )}
-              </div>
-
-              {/* Bar Formula Komposisi di Bawah Gambar */}
-              <div className="grid grid-cols-12 rounded-2xl overflow-hidden border border-[#5C3A21]/30 shadow-sm text-xs">
-                <div className="col-span-5 bg-[#5C3A21] text-white p-2.5 flex items-center justify-center font-bold">
-                  <span className="truncate text-[11px] uppercase tracking-tight">
-                    {isSelectedBrownies
-                      ? `Brownies ${browniesSize}`
-                      : selectedProduct.name.split(' ').slice(0, 2).join(' ')}
-                  </span>
+              {selectedProduct.imageUrl &&
+              selectedProduct.imageUrl !== '/images/storefront-counter.jpg' ? (
+                <div className="w-full max-w-[230px] sm:max-w-[260px] mt-6 rounded-2xl overflow-hidden border-4 border-white shadow-lg bg-white">
+                  <img
+                    src={selectedProduct.imageUrl}
+                    alt={selectedProduct.name}
+                    className="w-full h-52 sm:h-60 object-cover block"
+                  />
                 </div>
-                <div className="col-span-7 bg-[#FFFDF9] text-[#3B2618] p-2.5 flex items-center font-mono text-[10px] font-semibold uppercase tracking-tight leading-tight">
-                  {(selectedProduct.ingredients ?? ['Bahan Premium']).join(' + ')}
+              ) : (
+                <div className="w-36 h-36 mt-6 rounded-full bg-[#FFFDF9] border-4 border-white shadow-lg flex items-center justify-center text-7xl select-none">
+                  {selectedProduct.emoji}
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* SISI KANAN (7 Kolom): Detail Menu, Opsi Bulat KopKen (Khusus Brownies), & Komposisi */}
-            <div className="md:col-span-7 p-5 sm:p-7 flex flex-col justify-between space-y-5 bg-[#FFFDF9]">
-              <div className="space-y-4">
-                {/* Header Kanan */}
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-black text-xl sm:text-2xl text-[#3B2618] leading-tight">
-                      {isSelectedBrownies ? 'Brownies Fudgy AJCUlicious' : selectedProduct.name}
-                    </h3>
-                    <p className="font-extrabold text-lg text-[#5C3A21] mt-1">
-                      {isSelectedBrownies
-                        ? formatRupiah(browniesSize === '200g' ? 28000 : 22000)
-                        : formatRupiah(selectedProduct.price)}
-                      {isSelectedBrownies && (
-                        <span className="text-xs font-semibold text-[#8C6D53] ml-1.5">
-                          ({browniesSize} &bull; {browniesSugar} &bull; {browniesSalt})
-                        </span>
-                      )}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProduct(null)}
-                    className="hidden md:flex p-2 rounded-full bg-[#FAF6F0] hover:bg-[#F2E8DC] text-[#3B2618] border border-[#EADFD3] transition"
-                    aria-label="Tutup detail"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Deskripsi Produk */}
-                <p className="text-xs sm:text-sm text-[#6E523D] leading-relaxed">
-                  {selectedProduct.description}
+            {/* Detail, Opsi, & Tombol Pesan di Bawah */}
+            <div className="p-5 sm:p-6 space-y-4">
+              <div>
+                <h3 className="font-black text-lg sm:text-xl text-[#3B2618] leading-tight">
+                  {isSelectedBrownies
+                    ? 'Brownies Fudgy AJCUlicious'
+                    : selectedProduct.name}
+                </h3>
+                <p className="font-extrabold text-lg text-[#5C3A21] mt-1">
+                  {isSelectedBrownies
+                    ? formatRupiah(browniesSize === '200g' ? 28000 : 22000)
+                    : formatRupiah(selectedProduct.price)}
+                  {isSelectedBrownies && (
+                    <span className="text-xs font-semibold text-[#8C6D53] ml-1.5">
+                      ({browniesSize} &bull; {browniesSugar} &bull; {browniesSalt})
+                    </span>
+                  )}
                 </p>
+              </div>
+
+              {/* Deskripsi Produk */}
+              <p className="text-xs sm:text-sm text-[#6E523D] leading-relaxed">
+                {selectedProduct.description}
+              </p>
 
                 {/* ================= KHUSUS BROWNIES: PILIHAN UKURAN (150g / 200g) & OPSI BULAT ALA KOPI KENANGAN ================= */}
                 {isSelectedBrownies && (
@@ -720,43 +632,22 @@ export default function ProductCatalog({
                   </div>
                 )}
 
-                {/* Grid Kotak Komposisi Bahan Utama */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#7D5E46]">
-                      Komposisi &amp; Bahan Utama
-                    </span>
-                    <span className="text-[11px] text-[#8C6D53] font-medium">
-                      100% Fresh Homemade
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 border-t border-l border-[#C8B197] rounded-xl overflow-hidden bg-[#FAF6F0]">
-                    {(selectedProduct.ingredients ?? []).map((ing, idx) => (
-                      <div
-                        key={idx}
-                        className="p-3 border-r border-b border-[#C8B197] flex flex-col items-center justify-center text-center gap-1 hover:bg-[#F2E8DC] transition-colors min-h-[58px]"
-                      >
-                        <span className="font-mono text-[10px] font-bold uppercase tracking-tight text-[#3B2618] leading-tight">
-                          {ing}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
               {/* Footer Modal: Tombol Tambah Keranjang */}
-              <div className="pt-4 border-t border-[#EADFD3] flex items-center justify-end">
+              <div className="pt-3 border-t border-[#EADFD3] flex items-center justify-end">
                 {isSelectedBrownies && activeBrowniesTargetProduct ? (
                   <button
                     type="button"
                     onClick={() => {
+                      if (!isOrderOpen) {
+                        setSelectedProduct(null);
+                        onBlockedByClosedPO?.();
+                        return;
+                      }
                       onAddToCart(activeBrowniesTargetProduct);
                       setJustAddedCustomBrownies(true);
                       setTimeout(() => setJustAddedCustomBrownies(false), 1500);
                     }}
-                    className="w-full sm:w-auto px-6 py-3 rounded-xl bg-[#5C3A21] text-white text-xs font-bold hover:bg-[#462B18] active:scale-95 transition-all shadow-sm"
+                    className="w-full py-3 px-5 rounded-xl bg-[#5C3A21] text-white text-xs font-bold hover:bg-[#462B18] active:scale-95 transition-all shadow-sm"
                   >
                     {justAddedCustomBrownies
                       ? `Berhasil Ditambah (${browniesSize} - ${formatRupiah(
@@ -767,21 +658,21 @@ export default function ProductCatalog({
                         )})`}
                   </button>
                 ) : selectedInCart ? (
-                  <div className="inline-flex items-center gap-2.5 bg-[#FAF6F0] border border-[#D8C2A8] rounded-xl px-3 py-1.5">
+                  <div className="w-full flex items-center justify-between bg-[#FAF6F0] border border-[#D8C2A8] rounded-xl px-3 py-1.5">
                     <button
                       type="button"
                       onClick={() => onUpdateQuantity(selectedProduct.id, -1)}
-                      className="w-7 h-7 rounded-lg bg-white text-[#5C3A21] flex items-center justify-center font-bold hover:bg-[#E6D8C7]"
+                      className="w-8 h-8 rounded-lg bg-white text-[#5C3A21] flex items-center justify-center font-bold hover:bg-[#E6D8C7]"
                     >
                       -
                     </button>
-                    <span className="text-xs font-extrabold min-w-[20px] text-center text-[#3B2618]">
+                    <span className="text-xs font-extrabold text-[#3B2618]">
                       {selectedInCart.quantity} di Keranjang
                     </span>
                     <button
                       type="button"
                       onClick={() => onUpdateQuantity(selectedProduct.id, 1)}
-                      className="w-7 h-7 rounded-lg bg-[#5C3A21] text-white flex items-center justify-center font-bold hover:bg-[#462B18]"
+                      className="w-8 h-8 rounded-lg bg-[#5C3A21] text-white flex items-center justify-center font-bold hover:bg-[#462B18]"
                     >
                       +
                     </button>
@@ -789,8 +680,15 @@ export default function ProductCatalog({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => onAddToCart(selectedProduct)}
-                    className="w-full sm:w-auto px-6 py-3 rounded-xl bg-[#5C3A21] text-white text-xs font-bold hover:bg-[#462B18] active:scale-95 transition-all shadow-sm"
+                    onClick={() => {
+                      if (!isOrderOpen) {
+                        setSelectedProduct(null);
+                        onBlockedByClosedPO?.();
+                        return;
+                      }
+                      onAddToCart(selectedProduct);
+                    }}
+                    className="w-full py-3 px-5 rounded-xl bg-[#5C3A21] text-white text-xs font-bold hover:bg-[#462B18] active:scale-95 transition-all shadow-sm"
                   >
                     + Tambah ke Keranjang
                   </button>
