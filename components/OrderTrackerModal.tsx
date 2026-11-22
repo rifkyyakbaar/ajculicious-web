@@ -45,7 +45,6 @@ export default function OrderTrackerModal({
   // Review state for completed orders
   const [reviewOrderId, setReviewOrderId] = useState<string | null>(null);
   const [reviewName, setReviewName] = useState('');
-  const [reviewFaculty, setReviewFaculty] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSuccess, setReviewSuccess] = useState(false);
@@ -94,7 +93,6 @@ export default function OrderTrackerModal({
 
     onSubmitReview({
       customerName: reviewName.trim(),
-      faculty: reviewFaculty.trim() || 'Mahasiswa Kampus',
       rating: reviewRating,
       menuOrdered,
       comment: reviewComment.trim(),
@@ -452,23 +450,14 @@ export default function OrderTrackerModal({
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="text"
-                                value={reviewName}
-                                onChange={(e) => setReviewName(e.target.value)}
-                                placeholder="Nama Anda"
-                                className="px-3 py-1.5 rounded-xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618]"
-                                required
-                              />
-                              <input
-                                type="text"
-                                value={reviewFaculty}
-                                onChange={(e) => setReviewFaculty(e.target.value)}
-                                placeholder="Fakultas / Kampus"
-                                className="px-3 py-1.5 rounded-xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618]"
-                              />
-                            </div>
+                            <input
+                              type="text"
+                              value={reviewName}
+                              onChange={(e) => setReviewName(e.target.value)}
+                              placeholder="Nama Anda"
+                              className="w-full px-3 py-1.5 rounded-xl border border-[#E6D8C7] bg-white text-xs text-[#3B2618]"
+                              required
+                            />
 
                             <textarea
                               rows={2}

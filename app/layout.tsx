@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,9 +9,6 @@ export const metadata: Metadata = {
   title: "AJCUlicious - Homemade Cookies, Dubai Cookies, Brownies & Dimsum Hangat",
   description:
     "Toko dessert dan camilan homemade sistem Pre-Order (PO) per Batch & Ambil di Kampus. Nikmati Dubai Chewy Cookies Pistachio, Soft Cookies, Fudgy Brownies, dan Dimsum Hangat langsung di kampus!",
-  icons: {
-    icon: "/favicon.ico",
-  },
 };
 
 export default function RootLayout({
@@ -25,6 +23,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {children}
+        <Analytics />
       </body>
     </html>
   );

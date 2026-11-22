@@ -6,6 +6,7 @@ import { sendFonnteWhatsAppMessage } from '../lib/fonnte';
 import { formatRupiah } from '../utils/formatters';
 import {
   ActionResponse,
+  ActiveBatchInfo,
   AdminUserProfile,
   DbOrderStatus,
   DbPaymentStatus,
@@ -491,9 +492,20 @@ export async function updateProductStockAndAvailability(
 }
 
 /**
+ * Helper parsing nomor batch dari nama batch (misal "Batch #7 - ..." -> 7)
+ */
+function parseBatchNumberFromName(name: string): number | null {
+  const match = name.match(/#\s*(\d+)/) || name.match(/\bbatch\s+(\d+)\b/i);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+}
+
+/**
  * Server Action Admin: Update Pengaturan Batch PO di Database Supabase
  */
 export async function updateBatchSettingsInDb(input: {
+  batchNumber?: number;
   batchName: string;
   isOpen: boolean;
   orderOpenAt?: string | null;
@@ -505,7 +517,7 @@ export async function updateBatchSettingsInDb(input: {
   readyPickupDate: string;
   readyPickupTime: string;
   pickupLocation?: string;
-}): Promise<ActionResponse<boolean>> {
+}): Promise<ActionResponse<{ batchNumber: number }>> {
   try {
     if (input.orderOpenAt && input.orderCloseAt) {
       const openMs = Date.parse(input.orderOpenAt);
@@ -520,10 +532,28 @@ export async function updateBatchSettingsInDb(input: {
     }
 
     const supabase = createSupabaseServerClient();
+    const cleanName = input.batchName.trim();
+    let resolvedBatchNumber =
+      typeof input.batchNumber === 'number' &&
+      Number.isFinite(input.batchNumber) &&
+      input.batchNumber >= 1
+        ? Math.floor(input.batchNumber)
+        : parseBatchNumberFromName(cleanName);
+
+    if (!resolvedBatchNumber) {
+      const { data: currentBatch } = await supabase
+        .from('batch_settings')
+        .select('batch_number')
+        .eq('id', 1)
+        .maybeSingle();
+      resolvedBatchNumber = Math.max(currentBatch?.batch_number ?? 1, 1);
+    }
+
     const { error } = await supabase
       .from('batch_settings')
       .update({
-        batch_name: input.batchName.trim(),
+        batch_number: resolvedBatchNumber,
+        batch_name: cleanName,
         is_open: input.isOpen,
         order_open_at: input.orderOpenAt ?? null,
         order_close_at: input.orderCloseAt ?? null,
@@ -549,7 +579,7 @@ export async function updateBatchSettingsInDb(input: {
     revalidatePath('/');
     revalidatePath('/cek-pesanan');
     revalidatePath('/admin');
-    return { success: true, data: true };
+    return { success: true, data: { batchNumber: resolvedBatchNumber } };
   } catch (err: unknown) {
     return {
       success: false,
@@ -559,45 +589,55 @@ export async function updateBatchSettingsInDb(input: {
 }
 
 /**
- * Server Action Admin: Ambil Semua Pesanan & Ringkasan Laporan Penjualan (Agregasi)
+ * Server Action Admin: Ambil Semua Pesanan, Info Batch Aktif & Ringkasan Penjualan
  */
 export async function getAdminOrdersAndSummary(): Promise<
   ActionResponse<{
     orders: OrderWithItems[];
     summary: SalesSummaryReport;
+    activeBatch: ActiveBatchInfo;
   }>
 > {
   try {
     const supabase = createSupabaseServerClient();
 
-    const { data: ordersData, error } = await supabase
-      .from('orders')
-      .select(
-        `
-        id,
-        invoice_code,
-        customer_name,
-        customer_phone,
-        payment_method,
-        payment_status,
-        payment_proof_url,
-        bank_info,
-        customer_notes,
-        total_price,
-        status,
-        created_at,
-        order_items (
+    const [{ data: ordersData, error }, { data: batchRow }] = await Promise.all([
+      supabase
+        .from('orders')
+        .select(
+          `
           id,
-          order_id,
-          product_id,
-          product_name_snapshot,
-          quantity,
-          price_at_purchase,
-          subtotal
+          invoice_code,
+          customer_name,
+          customer_phone,
+          payment_method,
+          payment_status,
+          payment_proof_url,
+          bank_info,
+          customer_notes,
+          batch_number,
+          batch_name,
+          total_price,
+          status,
+          created_at,
+          order_items (
+            id,
+            order_id,
+            product_id,
+            product_name_snapshot,
+            quantity,
+            price_at_purchase,
+            subtotal
+          )
+        `
         )
-      `
-      )
-      .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('batch_settings')
+        .select('batch_number, batch_name')
+        .eq('id', 1)
+        .maybeSingle(),
+    ]);
 
     if (error) {
       return {
@@ -605,6 +645,13 @@ export async function getAdminOrdersAndSummary(): Promise<
         error: error.message || 'Gagal memuat laporan pesanan.',
       };
     }
+
+    const activeBatch: ActiveBatchInfo = {
+      batch_number: Math.max(batchRow?.batch_number ?? 1, 1),
+      batch_name:
+        batchRow?.batch_name?.trim() ||
+        `Batch #${Math.max(batchRow?.batch_number ?? 1, 1)}`,
+    };
 
     const orders = (ordersData as unknown as OrderWithItems[]) ?? [];
     const activeOrders = orders.filter((o) => o.status !== 'BATAL');
@@ -665,6 +712,7 @@ export async function getAdminOrdersAndSummary(): Promise<
       data: {
         orders,
         summary,
+        activeBatch,
       },
     };
   } catch (err: unknown) {

@@ -143,7 +143,6 @@ export default function TestimonialsSection({
     const res = await submitCustomerReview({
       invoiceCode: selectedOrderForReview.invoiceCode,
       customerName: selectedOrderForReview.customerName,
-      faculty: 'Pembeli Terverifikasi',
       rating,
       menuOrdered: selectedOrderForReview.menuOrdered,
       comment: cleanComment,
@@ -210,11 +209,6 @@ export default function TestimonialsSection({
           <p className="font-bold text-[#3B2618] truncate">
             {rev.customerName}
           </p>
-          {rev.faculty && (
-            <p className="text-[10px] text-[#8C6D53] truncate">
-              {rev.faculty}
-            </p>
-          )}
         </div>
         <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0] border border-[#EADFD3] text-[#5C3A21] text-[10px] font-medium truncate max-w-[125px] shrink-0">
           {rev.menuOrdered}

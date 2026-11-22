@@ -1,6 +1,9 @@
 import { Suspense } from 'react';
 import type { Metadata } from 'next';
-import { getCatalogProducts } from '@/actions/catalog-actions';
+import {
+  getBatchSettingsFromDb,
+  getCatalogProducts,
+} from '@/actions/catalog-actions';
 import AdminPortalClient from './AdminPortalClient';
 
 export const metadata: Metadata = {
@@ -9,8 +12,16 @@ export const metadata: Metadata = {
 };
 
 async function AdminPageLoader() {
-  const initialProducts = await getCatalogProducts('all');
-  return <AdminPortalClient initialProducts={initialProducts} />;
+  const [initialProducts, initialBatchConfig] = await Promise.all([
+    getCatalogProducts('all'),
+    getBatchSettingsFromDb(),
+  ]);
+  return (
+    <AdminPortalClient
+      initialProducts={initialProducts}
+      initialBatchConfig={initialBatchConfig}
+    />
+  );
 }
 
 export default function AdminPage() {

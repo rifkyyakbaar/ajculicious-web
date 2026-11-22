@@ -388,6 +388,8 @@ export async function getOrderByInvoice(
         payment_proof_url,
         bank_info,
         customer_notes,
+        batch_number,
+        batch_name,
         total_price,
         status,
         created_at,
@@ -591,6 +593,8 @@ export async function getOrdersByInvoiceList(
         payment_proof_url,
         bank_info,
         customer_notes,
+        batch_number,
+        batch_name,
         total_price,
         status,
         created_at,
@@ -739,7 +743,6 @@ const MAX_REVIEW_COMMENT_LENGTH = 180;
 export async function submitCustomerReview(input: {
   invoiceCode?: string;
   customerName?: string;
-  faculty?: string;
   rating: number;
   menuOrdered?: string;
   comment: string;
@@ -748,7 +751,6 @@ export async function submitCustomerReview(input: {
     id: string;
     invoiceCode?: string;
     customerName: string;
-    faculty: string;
     rating: number;
     menuOrdered: string;
     comment: string;
@@ -843,7 +845,6 @@ export async function submitCustomerReview(input: {
       .insert({
         invoice_code: orderRow.invoice_code,
         customer_name: orderRow.customer_name || cleanName,
-        faculty: (input.faculty ?? '').trim() || 'Pembeli Terverifikasi',
         rating: Math.min(5, Math.max(1, Math.round(input.rating || 5))),
         menu_ordered:
           orderedMenus ||
@@ -876,7 +877,6 @@ export async function submitCustomerReview(input: {
         id: data.id,
         invoiceCode: data.invoice_code || orderRow.invoice_code,
         customerName: data.customer_name,
-        faculty: data.faculty,
         rating: data.rating,
         menuOrdered: data.menu_ordered,
         comment: data.comment,

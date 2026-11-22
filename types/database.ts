@@ -32,7 +32,6 @@ export interface ReviewRow {
   id: string;
   invoice_code?: string | null;
   customer_name: string;
-  faculty: string;
   rating: number;
   menu_ordered: string;
   comment: string;
@@ -67,6 +66,8 @@ export interface OrderRow {
   payment_proof_url?: string | null;
   bank_info?: string | null;
   customer_notes?: string | null;
+  batch_number?: number;
+  batch_name?: string;
   total_price: number;
   status: DbOrderStatus;
   created_at: string;
@@ -119,6 +120,8 @@ export interface CreateOrderSuccessData {
   payment_proof_url?: string | null;
   bank_info?: string | null;
   customer_notes?: string | null;
+  batch_number?: number;
+  batch_name?: string;
   total_price: number;
   status: DbOrderStatus;
   items: CreateOrderItemResult[];
@@ -126,6 +129,11 @@ export interface CreateOrderSuccessData {
   whatsapp_message: string;
   wa_notification_sent?: boolean;
   wa_verified_by_gateway?: boolean;
+}
+
+export interface ActiveBatchInfo {
+  batch_number: number;
+  batch_name: string;
 }
 
 export interface ActionResponse<T> {

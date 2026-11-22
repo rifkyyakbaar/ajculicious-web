@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Store,
   LogOut,
@@ -35,6 +35,7 @@ import {
   User,
   Image as ImageIcon,
   Scale,
+  Layers,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -51,6 +52,7 @@ import {
   DbPaymentStatus,
   OrderWithItems,
   SalesSummaryReport,
+  TopSellingProductStat,
 } from '../types/database';
 import {
   getAdminOrdersAndSummary,
@@ -72,6 +74,58 @@ import {
   formatWitaDateOnlyDisplay,
   formatPickupTimeRange,
 } from '../utils/batchSchedule';
+
+function extractBatchNumber(name?: string | null): number | null {
+  if (!name) return null;
+  const match = name.match(/#\s*(\d+)/) || name.match(/\bbatch\s+(\d+)\b/i);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+}
+
+function buildSummaryFromOrders(orders: OrderWithItems[]): SalesSummaryReport {
+  const activeOrders = orders.filter((o) => o.status !== 'BATAL');
+  const productStatsMap = new Map<string, TopSellingProductStat>();
+
+  for (const order of activeOrders) {
+    for (const item of order.order_items ?? []) {
+      const existing = productStatsMap.get(item.product_id) ?? {
+        product_id: item.product_id,
+        product_name: item.product_name_snapshot,
+        total_quantity_sold: 0,
+        total_revenue: 0,
+      };
+      existing.total_quantity_sold += item.quantity;
+      existing.total_revenue += item.subtotal;
+      productStatsMap.set(item.product_id, existing);
+    }
+  }
+
+  return {
+    total_omzet: activeOrders.reduce((sum, o) => sum + o.total_price, 0),
+    total_orders: orders.length,
+    cod_orders_count: activeOrders.filter((o) => o.payment_method === 'COD')
+      .length,
+    qris_orders_count: activeOrders.filter((o) => o.payment_method === 'QRIS')
+      .length,
+    transfer_orders_count: activeOrders.filter(
+      (o) => o.payment_method === 'TRANSFER'
+    ).length,
+    paid_orders_count: activeOrders.filter(
+      (o) => o.payment_status === 'SUDAH_BAYAR'
+    ).length,
+    unpaid_orders_count: activeOrders.filter(
+      (o) => (o.payment_status || 'BELUM_BAYAR') === 'BELUM_BAYAR'
+    ).length,
+    pending_orders_count: orders.filter((o) => o.status === 'PENDING').length,
+    ready_orders_count: orders.filter((o) => o.status === 'SIAP_DIAMBIL').length,
+    completed_orders_count: orders.filter((o) => o.status === 'SELESAI').length,
+    cancelled_orders_count: orders.filter((o) => o.status === 'BATAL').length,
+    top_products: Array.from(productStatsMap.values()).sort(
+      (a, b) => b.total_quantity_sold - a.total_quantity_sold
+    ),
+  };
+}
 
 interface AdminDashboardViewProps {
   adminProfile?: AdminUserProfile | null;
@@ -158,20 +212,25 @@ export default function AdminDashboardView({
   const [newIngNeed, setNewIngNeed] = useState<number>(1);
 
   // Live Supabase Data States
+  const initialBatchNumber =
+    batchConfig?.batchNumber ||
+    extractBatchNumber(batchConfig?.batchName) ||
+    1;
+  const initialBatchName =
+    batchConfig?.batchName || `Batch #${initialBatchNumber}`;
+
   const [dbOrders, setDbOrders] = useState<OrderWithItems[]>([]);
-  const [summary, setSummary] = useState<SalesSummaryReport>({
-    total_omzet: 0,
-    total_orders: 0,
-    cod_orders_count: 0,
-    qris_orders_count: 0,
-    paid_orders_count: 0,
-    unpaid_orders_count: 0,
-    pending_orders_count: 0,
-    ready_orders_count: 0,
-    completed_orders_count: 0,
-    cancelled_orders_count: 0,
-    top_products: [],
+  const [activeBatchMeta, setActiveBatchMeta] = useState<{
+    batchNumber: number;
+    batchName: string;
+  }>({
+    batchNumber: initialBatchNumber,
+    batchName: initialBatchName,
   });
+  const [selectedBatchFilter, setSelectedBatchFilter] = useState<number | 'ALL'>(
+    initialBatchNumber
+  );
+  const hasPickedBatchRef = useRef(false);
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [sendingWaId, setSendingWaId] = useState<string | null>(null);
@@ -204,9 +263,9 @@ export default function AdminDashboardView({
   const [isSavingMenu, setIsSavingMenu] = useState(false);
 
   // Form Jadwal Batch PO (Berbasis Date & Time Picker WITA Otomatis)
-  const [batchNameInput, setBatchNameInput] = useState(
-    batchConfig?.batchName || 'Batch #4 - November Sweet Week'
-  );
+  const [batchNumberInput, setBatchNumberInput] =
+    useState<number>(initialBatchNumber);
+  const [batchNameInput, setBatchNameInput] = useState(initialBatchName);
   const [batchOpenAtInput, setBatchOpenAtInput] = useState(
     isoToWitaDateTimeLocal(batchConfig?.orderOpenAt) || '2026-11-18T08:00'
   );
@@ -262,7 +321,14 @@ export default function AdminDashboardView({
 
       if (ordersRes.success && ordersRes.data) {
         setDbOrders(ordersRes.data.orders);
-        setSummary(ordersRes.data.summary);
+        if (ordersRes.data.activeBatch) {
+          const liveNum = ordersRes.data.activeBatch.batch_number;
+          const liveName = ordersRes.data.activeBatch.batch_name;
+          setActiveBatchMeta({ batchNumber: liveNum, batchName: liveName });
+          if (!hasPickedBatchRef.current) {
+            setSelectedBatchFilter(liveNum);
+          }
+        }
       }
 
       if (allDbProducts && allDbProducts.length > 0) {
@@ -465,6 +531,7 @@ export default function AdminDashboardView({
 
     setIsSavingBatch(true);
     const res = await updateBatchSettingsInDb({
+      batchNumber: batchNumberInput,
       batchName: batchNameInput,
       isOpen: batchIsOpenInput,
       orderOpenAt: openIso,
@@ -479,6 +546,15 @@ export default function AdminDashboardView({
     });
     setIsSavingBatch(false);
     if (res.success) {
+      const savedBatchNumber = res.data?.batchNumber ?? batchNumberInput;
+      setBatchNumberInput(savedBatchNumber);
+      setActiveBatchMeta({
+        batchNumber: savedBatchNumber,
+        batchName: batchNameInput.trim(),
+      });
+      hasPickedBatchRef.current = true;
+      setSelectedBatchFilter(savedBatchNumber);
+
       const liveEval = evaluateBatchOpenStatus(
         {
           isOpen: batchIsOpenInput,
@@ -490,6 +566,7 @@ export default function AdminDashboardView({
       if (onUpdateBatchConfig && batchConfig) {
         onUpdateBatchConfig({
           ...batchConfig,
+          batchNumber: savedBatchNumber,
           batchName: batchNameInput,
           isOpen: liveEval.effectiveIsOpen,
           manualIsOpen: batchIsOpenInput,
@@ -505,7 +582,7 @@ export default function AdminDashboardView({
         });
       }
       showToast(
-        `Jadwal PO tersimpan! Status saat ini: ${liveEval.statusLabel}`
+        `Jadwal Batch #${savedBatchNumber} tersimpan! Status: ${liveEval.statusLabel}`
       );
     } else {
       showToast(res.error || 'Gagal menyimpan jadwal Pre-Order.');
@@ -578,8 +655,81 @@ export default function AdminDashboardView({
     }
   };
 
+  // Opsi filter per batch (gabungan batch dari riwayat pesanan + batch aktif saat ini)
+  const batchOptions = useMemo(() => {
+    const map = new Map<
+      number,
+      {
+        batchNumber: number;
+        batchName: string;
+        totalOrders: number;
+        activeOrders: number;
+        totalOmzet: number;
+        isActive: boolean;
+      }
+    >();
+
+    map.set(activeBatchMeta.batchNumber, {
+      batchNumber: activeBatchMeta.batchNumber,
+      batchName: activeBatchMeta.batchName,
+      totalOrders: 0,
+      activeOrders: 0,
+      totalOmzet: 0,
+      isActive: true,
+    });
+
+    for (const order of dbOrders) {
+      const bNum = order.batch_number ?? 1;
+      const existing = map.get(bNum);
+      const fallbackName = order.batch_name?.trim() || `Batch #${bNum}`;
+      const entry = existing ?? {
+        batchNumber: bNum,
+        batchName: fallbackName,
+        totalOrders: 0,
+        activeOrders: 0,
+        totalOmzet: 0,
+        isActive: bNum === activeBatchMeta.batchNumber,
+      };
+      if (!existing && order.batch_name?.trim()) {
+        entry.batchName = order.batch_name.trim();
+      }
+      entry.totalOrders += 1;
+      if (order.status !== 'BATAL') {
+        entry.activeOrders += 1;
+        entry.totalOmzet += order.total_price;
+      }
+      map.set(bNum, entry);
+    }
+
+    return Array.from(map.values()).sort(
+      (a, b) => b.batchNumber - a.batchNumber
+    );
+  }, [dbOrders, activeBatchMeta]);
+
+  const scopedOrders = useMemo(() => {
+    if (selectedBatchFilter === 'ALL') return dbOrders;
+    return dbOrders.filter(
+      (o) => (o.batch_number ?? 1) === selectedBatchFilter
+    );
+  }, [dbOrders, selectedBatchFilter]);
+
+  const selectedBatchOption = useMemo(
+    () =>
+      selectedBatchFilter === 'ALL'
+        ? null
+        : batchOptions.find((b) => b.batchNumber === selectedBatchFilter) ||
+          null,
+    [batchOptions, selectedBatchFilter]
+  );
+
+  const summary = useMemo(
+    () => buildSummaryFromOrders(scopedOrders),
+    [scopedOrders]
+  );
+
   const handleExportExcel = () => {
-    const rows = dbOrders.map((o) => ({
+    const rows = scopedOrders.map((o) => ({
+      Batch: o.batch_name || `Batch #${o.batch_number ?? 1}`,
       'Kode Invoice': o.invoice_code,
       'Nama Pemesan': o.customer_name,
       'No. WhatsApp': o.customer_phone || '-',
@@ -598,14 +748,18 @@ export default function AdminDashboardView({
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Laporan_Pesanan_AJCUlicious');
+    const batchSuffix =
+      selectedBatchFilter === 'ALL'
+        ? 'Semua_Batch'
+        : `Batch_${selectedBatchFilter}`;
     XLSX.writeFile(
       wb,
-      `Laporan_AJCUlicious_${new Date().toISOString().slice(0, 10)}.xlsx`
+      `Laporan_AJCUlicious_${batchSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`
     );
   };
 
-  // Filter pesanan berdasarkan Status Pesanan + Status Bayar + Pencarian
-  const filteredOrders = dbOrders.filter((o) => {
+  // Filter pesanan berdasarkan Status Pesanan + Status Bayar + Pencarian di dalam Batch terpilih
+  const filteredOrders = scopedOrders.filter((o) => {
     const matchesStatus = statusFilter === 'ALL' || o.status === statusFilter;
     const currentPayStatus: DbPaymentStatus =
       o.payment_status === 'SUDAH_BAYAR' ? 'SUDAH_BAYAR' : 'BELUM_BAYAR';
@@ -620,8 +774,8 @@ export default function AdminDashboardView({
     return matchesStatus && matchesPayment && matchesQuery;
   });
 
-  // Kalkulasi Analitik untuk Grafik Visual
-  const activeOrders = dbOrders.filter((o) => o.status !== 'BATAL');
+  // Kalkulasi Analitik untuk Grafik Visual (mengikuti Batch terpilih)
+  const activeOrders = scopedOrders.filter((o) => o.status !== 'BATAL');
   const paidOrders = activeOrders.filter(
     (o) => o.payment_status === 'SUDAH_BAYAR'
   );
@@ -643,9 +797,9 @@ export default function AdminDashboardView({
     ...summary.top_products.map((p) => p.total_quantity_sold)
   );
 
-  // Rekap jumlah produksi PO per menu
+  // Rekap jumlah produksi PO per menu (khusus Batch terpilih)
   const kitchenQueueMap = new Map<string, number>();
-  for (const order of dbOrders) {
+  for (const order of scopedOrders) {
     if (order.status === 'PENDING' || order.status === 'SIAP_DIAMBIL') {
       for (const item of order.order_items ?? []) {
         kitchenQueueMap.set(
@@ -766,6 +920,117 @@ export default function AdminDashboardView({
       </header>
 
       <main className="w-full min-w-0 px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
+        {/* ================= FILTER & PILIH BATCH PRE-ORDER ================= */}
+        <div className="bg-white border border-[#EADFD3] rounded-2xl p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-[#FAF6F0] border border-[#EADFD3] flex items-center justify-center text-[#5C3A21] shrink-0">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="font-bold text-xs sm:text-sm text-[#3B2618]">
+                  Cek Pesanan &amp; Laporan per Batch
+                </h2>
+                <p className="text-[11px] text-[#8C6D53]">
+                  {selectedBatchOption
+                    ? `Menampilkan khusus ${selectedBatchOption.batchName} (${selectedBatchOption.activeOrders} aktif • ${formatRupiah(
+                        selectedBatchOption.totalOmzet
+                      )})`
+                    : `Menampilkan gabungan seluruh batch (${dbOrders.length} total pesanan)`}
+                </p>
+              </div>
+            </div>
+
+            {selectedBatchFilter !== activeBatchMeta.batchNumber && (
+              <button
+                type="button"
+                onClick={() => {
+                  hasPickedBatchRef.current = true;
+                  setSelectedBatchFilter(activeBatchMeta.batchNumber);
+                }}
+                className="self-start sm:self-auto px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold transition whitespace-nowrap"
+              >
+                Kembali ke Batch Aktif (#{activeBatchMeta.batchNumber})
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {batchOptions.map((b) => {
+              const isSelected = selectedBatchFilter === b.batchNumber;
+              return (
+                <button
+                  key={b.batchNumber}
+                  type="button"
+                  onClick={() => {
+                    hasPickedBatchRef.current = true;
+                    setSelectedBatchFilter(b.batchNumber);
+                  }}
+                  title={b.batchName}
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
+                    isSelected
+                      ? 'bg-[#5C3A21] text-white border-[#5C3A21] shadow-sm'
+                      : 'bg-[#FAF6F0] text-[#5C3A21] border-[#EADFD3] hover:bg-[#F2E8DC]'
+                  }`}
+                >
+                  {b.isActive && (
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        isSelected ? 'bg-emerald-300' : 'bg-emerald-500'
+                      }`}
+                    />
+                  )}
+                  <span>Batch #{b.batchNumber}</span>
+                  {b.isActive && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                        isSelected
+                          ? 'bg-white/20 text-emerald-200'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      Aktif
+                    </span>
+                  )}
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${
+                      isSelected
+                        ? 'bg-white/20 text-white'
+                        : 'bg-white text-[#5C3A21] border border-[#EADFD3]'
+                    }`}
+                  >
+                    {b.totalOrders}
+                  </span>
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => {
+                hasPickedBatchRef.current = true;
+                setSelectedBatchFilter('ALL');
+              }}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
+                selectedBatchFilter === 'ALL'
+                  ? 'bg-[#3B2618] text-white border-[#3B2618] shadow-sm'
+                  : 'bg-white text-[#6E523D] border-[#EADFD3] hover:bg-[#FAF6F0]'
+              }`}
+            >
+              <span>Semua Batch</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${
+                  selectedBatchFilter === 'ALL'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-[#FAF6F0] text-[#5C3A21] border border-[#EADFD3]'
+                }`}
+              >
+                {dbOrders.length}
+              </span>
+            </button>
+          </div>
+        </div>
+
         {/* ================= 4 KARTU KPI RINGKASAN PENJUALAN ================= */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           <div className="bg-white border border-[#EADFD3] rounded-2xl p-4 space-y-1">
@@ -987,7 +1252,7 @@ export default function AdminDashboardView({
                 : 'bg-white text-[#5C3A21] border border-[#EADFD3] hover:bg-[#F2E8DC]'
             }`}
           >
-            Pesanan &amp; Verifikasi Bayar ({dbOrders.length})
+            Pesanan &amp; Verifikasi Bayar ({scopedOrders.length})
           </button>
 
           <button
@@ -1107,11 +1372,47 @@ export default function AdminDashboardView({
                 <p className="text-xs text-[#8C6D53]">Memuat data pesanan...</p>
               </div>
             ) : filteredOrders.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-2xl border border-[#EADFD3] space-y-1.5">
+              <div className="text-center py-12 bg-white rounded-2xl border border-[#EADFD3] space-y-2.5 px-4">
                 <AlertCircle className="w-6 h-6 text-[#8C6D53] mx-auto" />
                 <p className="text-xs font-semibold text-[#3B2618]">
-                  Belum ada pesanan yang sesuai filter
+                  {selectedBatchFilter === 'ALL'
+                    ? 'Belum ada pesanan yang sesuai filter'
+                    : `Belum ada pesanan di Batch #${selectedBatchFilter}`}
                 </p>
+                {selectedBatchFilter !== 'ALL' && dbOrders.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    {batchOptions
+                      .filter(
+                        (b) =>
+                          b.batchNumber !== selectedBatchFilter &&
+                          b.totalOrders > 0
+                      )
+                      .slice(0, 3)
+                      .map((b) => (
+                        <button
+                          key={b.batchNumber}
+                          type="button"
+                          onClick={() => {
+                            hasPickedBatchRef.current = true;
+                            setSelectedBatchFilter(b.batchNumber);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-[#FAF6F0] hover:bg-[#F2E8DC] border border-[#EADFD3] text-[#5C3A21] text-[11px] font-bold transition"
+                        >
+                          Lihat Batch #{b.batchNumber} ({b.totalOrders})
+                        </button>
+                      ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        hasPickedBatchRef.current = true;
+                        setSelectedBatchFilter('ALL');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#3B2618] text-white text-[11px] font-bold transition hover:bg-[#5C3A21]"
+                    >
+                      Tampilkan Semua Batch ({dbOrders.length})
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -1130,6 +1431,12 @@ export default function AdminDashboardView({
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-[#FAF6F0] text-[#5C3A21] border border-[#EADFD3]">
                             #{order.invoice_code}
+                          </span>
+                          <span
+                            title={order.batch_name || `Batch #${order.batch_number ?? 1}`}
+                            className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-[#5C3A21] border border-amber-200 font-bold"
+                          >
+                            Batch #{order.batch_number ?? 1}
                           </span>
                           <span className="font-bold text-sm text-[#3B2618]">
                             {order.customer_name}
@@ -1457,7 +1764,11 @@ export default function AdminDashboardView({
               <div className="flex items-center gap-2">
                 <ChefHat className="w-4 h-4 text-[#5C3A21]" />
                 <h3 className="font-bold text-sm text-[#3B2618]">
-                  Rekap Jumlah Produksi Dapur (PO Aktif)
+                  Rekap Jumlah Produksi Dapur (
+                  {selectedBatchFilter === 'ALL'
+                    ? 'Semua Batch'
+                    : `Batch #${selectedBatchFilter}`}
+                  )
                 </h3>
               </div>
 
@@ -1485,11 +1796,39 @@ export default function AdminDashboardView({
             </div>
 
             <div className="bg-white border border-[#EADFD3] rounded-2xl p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[#5C3A21]" />
-                <h3 className="font-bold text-sm text-[#3B2618]">
-                  Pengaturan Jadwal Batch Pre-Order
-                </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#5C3A21]" />
+                  <h3 className="font-bold text-sm text-[#3B2618]">
+                    Pengaturan Jadwal Batch Pre-Order
+                  </h3>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const maxBatchNum = Math.max(
+                      batchNumberInput,
+                      activeBatchMeta.batchNumber,
+                      ...batchOptions.map((b) => b.batchNumber)
+                    );
+                    const nextNum = maxBatchNum + 1;
+                    setBatchNumberInput(nextNum);
+                    setBatchNameInput((prev) =>
+                      /batch\s*#?\s*\d+/i.test(prev)
+                        ? prev.replace(/batch\s*#?\s*\d+/i, `Batch #${nextNum}`)
+                        : `Batch #${nextNum} - ${prev.trim() || 'Pre-Order AJCUlicious'}`
+                    );
+                    setBatchIsOpenInput(true);
+                    showToast(
+                      `Siap membuat Batch #${nextNum}! Atur jadwal lalu klik Simpan Jadwal.`
+                    );
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#5C3A21] border border-amber-300 text-[11px] font-bold transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Mulai Batch Baru</span>
+                </button>
               </div>
 
               <form
@@ -1519,17 +1858,54 @@ export default function AdminDashboardView({
                   );
                 })()}
 
-                <div>
-                  <label className="block font-semibold text-[#3B2618] mb-1">
-                    Nama Batch Pre-Order
-                  </label>
-                  <input
-                    type="text"
-                    value={batchNameInput}
-                    onChange={(e) => setBatchNameInput(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
-                    required
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Nomor Batch
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={batchNumberInput}
+                      onChange={(e) => {
+                        const nextVal = Math.max(
+                          1,
+                          Number.parseInt(e.target.value, 10) || 1
+                        );
+                        setBatchNumberInput(nextVal);
+                        setBatchNameInput((prev) =>
+                          /batch\s*#?\s*\d+/i.test(prev)
+                            ? prev.replace(
+                                /batch\s*#?\s*\d+/i,
+                                `Batch #${nextVal}`
+                              )
+                            : prev
+                        );
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50 font-bold"
+                      required
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block font-semibold text-[#3B2618] mb-1">
+                      Nama Batch Pre-Order
+                    </label>
+                    <input
+                      type="text"
+                      value={batchNameInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBatchNameInput(val);
+                        const detected = extractBatchNumber(val);
+                        if (detected) {
+                          setBatchNumberInput(detected);
+                        }
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-[#EADFD3] bg-[#FAF6F0]/50"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

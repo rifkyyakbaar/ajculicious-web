@@ -127,7 +127,6 @@ export default function BuyerOrderTrackerModal({
     const result = await onSubmitReview({
       invoiceCode,
       customerName: reviewName.trim(),
-      faculty: 'Pembeli Terverifikasi',
       rating: reviewRating,
       menuOrdered,
       comment: reviewComment.trim().slice(0, 180),

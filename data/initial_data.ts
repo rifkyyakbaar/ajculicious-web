@@ -689,7 +689,6 @@ export const INITIAL_REVIEWS: ReviewRecord[] = [
   {
     id: 'rev-1',
     customerName: 'Nadia Kirana',
-    faculty: 'Fakultas Ekonomi & Bisnis',
     rating: 5,
     menuOrdered: 'Dubai Chewy Cookies Pistachio',
     comment:
@@ -700,7 +699,6 @@ export const INITIAL_REVIEWS: ReviewRecord[] = [
   {
     id: 'rev-2',
     customerName: 'Rizky Pratama',
-    faculty: 'Fakultas Teknik Informatika',
     rating: 5,
     menuOrdered: 'Dimsum Ayam Udang Hangat',
     comment:
@@ -711,7 +709,6 @@ export const INITIAL_REVIEWS: ReviewRecord[] = [
   {
     id: 'rev-3',
     customerName: 'Sherly Amanda',
-    faculty: 'Fakultas Kedokteran',
     rating: 5,
     menuOrdered: 'Fudgy Brownies Almond & Classic Chocochip',
     comment:
@@ -722,7 +719,6 @@ export const INITIAL_REVIEWS: ReviewRecord[] = [
   {
     id: 'rev-4',
     customerName: 'Kevin Sanjaya',
-    faculty: 'Fakultas Hukum',
     rating: 5,
     menuOrdered: 'Lotus Biscoff Dessert Box',
     comment:

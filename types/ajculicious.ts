@@ -88,7 +88,6 @@ export interface ReviewRecord {
   id: string;
   invoiceCode?: string;
   customerName: string;
-  faculty: string;
   rating: number; // 1-5
   menuOrdered: string;
   comment: string;

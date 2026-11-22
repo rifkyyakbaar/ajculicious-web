@@ -2,18 +2,23 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Product } from '@/types/ajculicious';
+import { BatchPOConfig, Product } from '@/types/ajculicious';
 import { AdminUserProfile } from '@/types/database';
 import AdminDashboardView from '@/components/AdminDashboardView';
 import AdminLoginModal from '@/components/AdminLoginModal';
 
 export default function AdminPortalClient({
   initialProducts,
+  initialBatchConfig,
 }: {
   initialProducts: Product[];
+  initialBatchConfig: BatchPOConfig;
 }) {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [batchConfig, setBatchConfig] = useState<BatchPOConfig>(
+    initialBatchConfig
+  );
   const [adminProfile, setAdminProfile] = useState<AdminUserProfile | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
@@ -64,6 +69,8 @@ export default function AdminPortalClient({
       }}
       products={products}
       onUpdateProducts={setProducts}
+      batchConfig={batchConfig}
+      onUpdateBatchConfig={setBatchConfig}
     />
   );
 }

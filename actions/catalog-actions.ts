@@ -200,7 +200,6 @@ export async function getReviewsFromDb(): Promise<ReviewRecord[]> {
       id: r.id,
       invoiceCode: r.invoice_code || undefined,
       customerName: r.customer_name,
-      faculty: r.faculty,
       rating: r.rating,
       menuOrdered: r.menu_ordered,
       comment: r.comment,

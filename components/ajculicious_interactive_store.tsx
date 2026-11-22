@@ -295,7 +295,6 @@ export default function AjculiciousInteractiveStore({
     const res = await submitCustomerReview({
       invoiceCode: newRev.invoiceCode,
       customerName: newRev.customerName,
-      faculty: newRev.faculty,
       rating: newRev.rating,
       menuOrdered: newRev.menuOrdered,
       comment: newRev.comment,
